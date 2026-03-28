@@ -463,19 +463,28 @@ function AttestatieApp() {
           
           try {
             const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-3.1-pro-preview",
               contents: [
                 {
                   parts: [
                     { inlineData: { mimeType: file.type, data: b64 } },
                     {
-                      text: `Dit is een afbeelding van een puntenlijst in tabelvorm. 
-De eerste kolom bevat de vaknamen. De volgende kolommen bevatten de punten over verschillende periodes.
-Extraheer voor elk vak de naam en het meest recente punt (het meest rechtse ingevulde punt in de rij).
-Geef ENKEL geldige JSON terug:
-[{"naam":"Vaknaam","punt":"14","maxPunt":"20"}]
-Als een punt '19/20' is, dan is punt '19' en maxPunt '20'. Als er '7,5/10' staat, is punt '7,5' en maxPunt '10'.
-Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
+                      text: `Analyseer deze afbeelding van een schoolrapport of puntenlijst. 
+Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
+Voor elk vak:
+1. Extraheer de volledige naam van het vak.
+2. Zoek de meest recente score (vaak de laatste kolom of de meest rechtse ingevulde waarde).
+3. Splits de score in het behaalde punt en het maximum (bv. "14/20" -> punt: 14, max: 20).
+4. Als er geen maximum staat, ga uit van 20 of zoek naar een kolomkop die het maximum aangeeft.
+5. Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
+
+Geef het resultaat terug als een JSON array van objecten:
+[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+
+Belangrijk:
+- Negeer titels, datums of andere tekst die geen vaknaam is.
+- Als een vak geen punt heeft, laat "punt" leeg ("").
+- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
                     }
                   ]
                 }
@@ -497,7 +506,8 @@ Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
               }
             });
 
-            const extracted = JSON.parse(response.text || "[]");
+            const text = response.text || "[]";
+            const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
             setLv(prevLv => {
               const updated = prevLv.map(v => {
                 const match = extracted.find((e: any) =>
@@ -675,7 +685,7 @@ Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
           
           try {
             const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
+              model: "gemini-3.1-pro-preview",
               contents: [
                 {
                   parts: [
@@ -686,13 +696,22 @@ Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
                       }
                     },
                     {
-                      text: `Dit is een afbeelding van een puntenlijst in tabelvorm. 
-De eerste kolom bevat de vaknamen. De volgende kolommen bevatten de punten over verschillende periodes.
-Extraheer voor elk vak de naam en het meest recente punt (het meest rechtse ingevulde punt in de rij).
-Geef ENKEL geldige JSON terug:
-[{"naam":"Vaknaam","punt":"14","maxPunt":"20"}]
-Als een punt '19/20' is, dan is punt '19' en maxPunt '20'. Als er '7,5/10' staat, is punt '7,5' en maxPunt '10'.
-Laat punt leeg als er geen score is.`
+                      text: `Analyseer deze afbeelding van een schoolrapport of puntenlijst. 
+Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
+Voor elk vak:
+1. Extraheer de volledige naam van het vak.
+2. Zoek de meest recente score (vaak de laatste kolom of de meest rechtse ingevulde waarde).
+3. Splits de score in het behaalde punt en het maximum (bv. "14/20" -> punt: 14, max: 20).
+4. Als er geen maximum staat, ga uit van 20 of zoek naar een kolomkop die het maximum aangeeft.
+5. Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
+
+Geef het resultaat terug als een JSON array van objecten:
+[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+
+Belangrijk:
+- Negeer titels, datums of andere tekst die geen vaknaam is.
+- Als een vak geen punt heeft, laat "punt" leeg ("").
+- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
                     }
                   ]
                 }
@@ -714,7 +733,8 @@ Laat punt leeg als er geen score is.`
               }
             });
 
-            const extracted = JSON.parse(response.text || "[]");
+            const text = response.text || "[]";
+            const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
             setLv(prevLv => {
               const updated = prevLv.map(v => {
                 const match = extracted.find((e: any) =>
