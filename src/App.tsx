@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, Component, ErrorInfo, ReactNode } from "react";
+import * as React from "react";
+import { useState, useEffect, useRef, ErrorInfo, ReactNode } from "react";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -78,8 +79,11 @@ interface ErrorBoundaryState {
   errorMessage: string;
 }
 
-class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false, errorMessage: "" };
+class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    (this as any).state = { hasError: false, errorMessage: "" };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true, errorMessage: error.message };
@@ -90,7 +94,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   render() {
-    const { hasError, errorMessage } = this.state;
+    const { hasError, errorMessage } = (this as any).state;
     if (hasError) {
       return (
         <div style={{ padding: "20px", textAlign: "center", background: "#FEE2E2", color: "#DC2626", borderRadius: "12px", margin: "20px" }}>
@@ -106,7 +110,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
       );
     }
 
-    return this.props.children;
+    return (this as any).props.children;
   }
 }
 
@@ -153,7 +157,6 @@ function AttestatieApp() {
   const [gedragAntw,    setGedragAntw]   = useState<any>({});
   const [score,         setScore]        = useState<number | null>(null);
   const [feedbackTekst, setFeedbackTekst]= useState("");
-  const [ocrLoading,    setOcrLoading]   = useState(false);
 
   // ── Font laden + Firebase auth listener ────────────────────
   useEffect(() => {
@@ -438,6 +441,7 @@ function AttestatieApp() {
     const [fout,setFout]= useState("");
     const [ocrMsg,  setOcrMsg]  = useState("");
     const [ocrFout, setOcrFout] = useState("");
+    const [ocrLoading, setOcrLoading] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
     const voegToe = () => {
@@ -494,29 +498,32 @@ Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
             });
 
             const extracted = JSON.parse(response.text || "[]");
-            if (extracted.length > 0) {
-              const newVakken = extracted.map((e: any) => ({
-                id: Date.now() + Math.random(),
-                naam: e.naam,
-                isHoofdvak: false,
-                punt: e.punt || "",
-                maxPunt: e.maxPunt || "20"
-              }));
-              setLv(newVakken);
-              setOcrMsg(`✅ ${extracted.length} vakken en punten herkend!`);
-            } else {
-              setOcrFout("Geen vakken gevonden op de afbeelding.");
-            }
+            setLv(prevLv => {
+              const updated = prevLv.map(v => {
+                const match = extracted.find((e: any) =>
+                  e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
+                  v.naam.toLowerCase().includes(e.naam.toLowerCase())
+                );
+                return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+              });
+              const nieuw = extracted
+                .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
+                .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+              return [...updated, ...nieuw];
+            });
+            setOcrMsg(`✅ ${extracted.length} vakken en punten herkend!`);
           } catch (error) {
             console.error("AI Error:", error);
             setOcrFout("Kon de tabel niet lezen. Probeer een duidelijkere foto.");
           }
           setOcrLoading(false);
+          e.target.value = "";
         };
         reader.readAsDataURL(file);
       } catch (error) {
         setOcrLoading(false); 
         setOcrFout("Fout bij laden van bestand.");
+        e.target.value = "";
       }
     };
 
@@ -651,6 +658,7 @@ Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
     const [lv,      setLv]      = useState([...vakken]);
     const [ocrMsg,  setOcrMsg]  = useState("");
     const [ocrFout, setOcrFout] = useState("");
+    const [ocrLoading, setOcrLoading] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
     const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
 
@@ -707,29 +715,33 @@ Laat punt leeg als er geen score is.`
             });
 
             const extracted = JSON.parse(response.text || "[]");
-            const updated = lv.map(v=>{
-              const match = extracted.find((e: any)=>
-                e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
-                v.naam.toLowerCase().includes(e.naam.toLowerCase())
-              );
-              return match ? {...v, punt:match.punt||"", maxPunt:match.maxPunt||"20"} : v;
+            setLv(prevLv => {
+              const updated = prevLv.map(v => {
+                const match = extracted.find((e: any) =>
+                  e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
+                  v.naam.toLowerCase().includes(e.naam.toLowerCase())
+                );
+                return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+              });
+              const nieuw = extracted
+                .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
+                .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+              return [...updated, ...nieuw];
             });
-            const nieuw = extracted
-              .filter((e: any)=>!lv.some(v=>v.naam.toLowerCase().includes(e.naam.toLowerCase())||e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-              .map((e: any)=>({id:Date.now()+Math.random(),naam:e.naam,isHoofdvak:false,punt:e.punt||"",maxPunt:e.maxPunt||"20"}));
-            setLv([...updated,...nieuw]);
             setOcrMsg(`✅ ${extracted.length} vakken herkend! Controleer en pas aan waar nodig.`);
           } catch (error) {
             console.error("AI Error:", error);
             setOcrFout("Kon de punten niet lezen. Probeer een duidelijkere afbeelding.");
           }
           setOcrLoading(false);
+          e.target.value = "";
         };
         reader.readAsDataURL(file);
       } catch (error) {
         console.error("File Reader Error:", error);
         setOcrLoading(false); 
         setOcrFout("Er ging iets mis. Probeer opnieuw.");
+        e.target.value = "";
       }
     };
 
