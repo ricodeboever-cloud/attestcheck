@@ -69,14 +69,23 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean, errorMessage: string }> {
-  state = { hasError: false, errorMessage: "" };
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
 
-  static getDerivedStateFromError(error: any) {
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorMessage: string;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, errorMessage: "" };
+
+  static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true, errorMessage: error.message };
   }
 
-  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("ErrorBoundary caught an error", error, errorInfo);
   }
 
@@ -427,6 +436,9 @@ function AttestatieApp() {
     const [lv,  setLv]  = useState(vakken.length ? [...vakken] : []);
     const [nv,  setNv]  = useState("");
     const [fout,setFout]= useState("");
+    const [ocrMsg,  setOcrMsg]  = useState("");
+    const [ocrFout, setOcrFout] = useState("");
+    const fileRef = useRef<HTMLInputElement>(null);
 
     const voegToe = () => {
       if (!nv.trim()) return;
@@ -434,6 +446,80 @@ function AttestatieApp() {
       setNv("");
     };
     const verwijder = (id: number) => setLv(lv.filter(v=>v.id!==id));
+
+    const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setOcrLoading(true); setOcrMsg(""); setOcrFout("");
+      try {
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+          const b64 = (ev.target?.result as string).split(",")[1];
+          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          
+          try {
+            const response = await ai.models.generateContent({
+              model: "gemini-3-flash-preview",
+              contents: [
+                {
+                  parts: [
+                    { inlineData: { mimeType: file.type, data: b64 } },
+                    {
+                      text: `Dit is een afbeelding van een puntenlijst in tabelvorm. 
+De eerste kolom bevat de vaknamen. De volgende kolommen bevatten de punten over verschillende periodes.
+Extraheer voor elk vak de naam en het meest recente punt (het meest rechtse ingevulde punt in de rij).
+Geef ENKEL geldige JSON terug:
+[{"naam":"Vaknaam","punt":"14","maxPunt":"20"}]
+Als een punt '19/20' is, dan is punt '19' en maxPunt '20'. Als er '7,5/10' staat, is punt '7,5' en maxPunt '10'.
+Neem ook vakken over die nog geen punten hebben, laat 'punt' dan leeg.`
+                    }
+                  ]
+                }
+              ],
+              config: {
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      naam: { type: Type.STRING },
+                      punt: { type: Type.STRING },
+                      maxPunt: { type: Type.STRING }
+                    },
+                    required: ["naam", "punt", "maxPunt"]
+                  }
+                }
+              }
+            });
+
+            const extracted = JSON.parse(response.text || "[]");
+            if (extracted.length > 0) {
+              const newVakken = extracted.map((e: any) => ({
+                id: Date.now() + Math.random(),
+                naam: e.naam,
+                isHoofdvak: false,
+                punt: e.punt || "",
+                maxPunt: e.maxPunt || "20"
+              }));
+              setLv(newVakken);
+              setOcrMsg(`✅ ${extracted.length} vakken en punten herkend!`);
+            } else {
+              setOcrFout("Geen vakken gevonden op de afbeelding.");
+            }
+          } catch (error) {
+            console.error("AI Error:", error);
+            setOcrFout("Kon de tabel niet lezen. Probeer een duidelijkere foto.");
+          }
+          setOcrLoading(false);
+        };
+        reader.readAsDataURL(file);
+      } catch (error) {
+        setOcrLoading(false); 
+        setOcrFout("Fout bij laden van bestand.");
+      }
+    };
+
     const verder = () => {
       if (!ls||!lj||!ll) { setFout("Vul school, jaar en leeftijd in!"); return; }
       if (!lv.length)    { setFout("Voeg minstens één vak toe!"); return; }
@@ -448,9 +534,28 @@ function AttestatieApp() {
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:52}}>🏫</div>
             <h2 style={S.h2}>Jouw schoolinfo</h2>
-            <p style={S.sub}>Vertel ons iets over jouw school</p>
+            <p style={S.sub}>Vertel ons iets over jouw school of scan je puntenlijst</p>
           </div>
           {fout && <div style={S.err}>{fout}</div>}
+
+          <div style={{background:`linear-gradient(135deg,${OR}14,${ORL}08)`,
+            border:`2px dashed ${OR}66`,borderRadius:16,padding:18,marginBottom:20,textAlign:"center"}}>
+            <div style={{fontSize:36,marginBottom:8}}>📸</div>
+            <p style={{fontWeight:800,color:ORD,margin:"0 0 6px",fontSize:15}}>Snelstart: Scan je puntenlijst</p>
+            <p style={{fontSize:12,color:"#8B6242",margin:"0 0 14px"}}>De AI herkent direct al je vakken en punten!</p>
+            <input ref={fileRef} type="file" accept="image/*" onChange={handleOCR} style={{display:"none"}}/>
+            {ocrLoading
+              ? <div style={{color:OR,fontWeight:700}}>🔍 Analyseren...</div>
+              : <button onClick={()=>fileRef.current?.click()} style={{
+                  background:OR,color:"white",border:"none",borderRadius:12,
+                  padding:"10px 22px",fontSize:14,fontWeight:700,cursor:"pointer",
+                  fontFamily:"inherit",boxShadow:`0 4px 14px ${OR}44`,
+                }}>📷 Foto van rapport</button>
+            }
+            {ocrMsg  && <div style={{...S.ok,  margin:"12px 0 0"}}>{ocrMsg}</div>}
+            {ocrFout && <div style={{...S.err, margin:"12px 0 0"}}>{ocrFout}</div>}
+          </div>
+
           <label style={S.lbl}>🏫 Naam van je school</label>
           <input style={S.input} value={ls} onChange={e=>setLs(e.target.value)} placeholder="Bv. Atheneum De Kust"/>
           <label style={S.lbl}>📅 Schooljaar / Graad</label>
@@ -479,7 +584,7 @@ function AttestatieApp() {
             {lv.map(v=>(
               <div key={v.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
                 background:ORBG,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
-                <span style={{fontWeight:700,color:"#2D1B00",fontSize:14}}>📖 {v.naam}</span>
+                <span style={{fontWeight:700,color:"#2D1B00",fontSize:14}}>📖 {v.naam} {v.punt && <span style={{color:OR, marginLeft:5}}>({v.punt}/{v.maxPunt})</span>}</span>
                 <button onClick={()=>verwijder(v.id)} style={{
                   background:"#FEE2E2",color:"#EF4444",border:"none",borderRadius:8,
                   padding:"4px 10px",cursor:"pointer",fontWeight:700,fontSize:15,
@@ -573,10 +678,13 @@ function AttestatieApp() {
                       }
                     },
                     {
-                      text: `Dit is een afbeelding van een puntenlijst. Extraheer alle vakken en hun punten.
-Geef ENKEL geldige JSON terug, zonder markdown:
-[{"naam":"Wiskunde","punt":"14","maxPunt":"20"}]
-Gebruik 100 als maxPunt als onbekend. Laat punt leeg als er geen score is.`
+                      text: `Dit is een afbeelding van een puntenlijst in tabelvorm. 
+De eerste kolom bevat de vaknamen. De volgende kolommen bevatten de punten over verschillende periodes.
+Extraheer voor elk vak de naam en het meest recente punt (het meest rechtse ingevulde punt in de rij).
+Geef ENKEL geldige JSON terug:
+[{"naam":"Vaknaam","punt":"14","maxPunt":"20"}]
+Als een punt '19/20' is, dan is punt '19' en maxPunt '20'. Als er '7,5/10' staat, is punt '7,5' en maxPunt '10'.
+Laat punt leeg als er geen score is.`
                     }
                   ]
                 }
