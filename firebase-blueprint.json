@@ -13,6 +13,44 @@
           "type": "string",
           "format": "email",
           "description": "User's email address"
+        },
+        "school": {
+          "type": "string",
+          "description": "User's school name"
+        },
+        "jaar": {
+          "type": "string",
+          "description": "User's current school year"
+        },
+        "leeftijd": {
+          "type": "string",
+          "description": "User's age"
+        },
+        "richting": {
+          "type": "string",
+          "description": "User's study direction"
+        },
+        "vakken": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "number" },
+              "naam": { "type": "string" },
+              "isHoofdvak": { "type": "boolean" },
+              "punt": { "type": "string" },
+              "maxPunt": { "type": "string" }
+            }
+          },
+          "description": "List of subjects and grades"
+        },
+        "gedragAntw": {
+          "type": "object",
+          "description": "User's answers to behavior questions"
+        },
+        "score": {
+          "type": "number",
+          "description": "User's calculated score"
         }
       },
       "required": ["naam", "email"]

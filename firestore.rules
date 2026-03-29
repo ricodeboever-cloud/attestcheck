@@ -31,9 +31,16 @@ service cloud.firestore {
 
     // Domain Validators
     function isValidUser(data) {
-      return data.keys().hasOnly(['naam', 'email']) &&
+      return data.keys().hasOnly(['naam', 'email', 'school', 'jaar', 'leeftijd', 'richting', 'vakken', 'gedragAntw', 'score']) &&
              data.naam is string && data.naam.size() > 0 && data.naam.size() < 100 &&
-             data.email is string && isValidEmail(data.email);
+             data.email is string && isValidEmail(data.email) &&
+             (!('school' in data) || data.school is string) &&
+             (!('jaar' in data) || data.jaar is string) &&
+             (!('leeftijd' in data) || data.leeftijd is string) &&
+             (!('richting' in data) || data.richting is string) &&
+             (!('vakken' in data) || data.vakken is list) &&
+             (!('gedragAntw' in data) || data.gedragAntw is map) &&
+             (!('score' in data) || data.score is number);
     }
 
     match /users/{userId} {

@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
+import Markdown from "react-markdown";
 
 // ═══════════════════════════════════════════════════════════════════════
 // 🔧 ERROR HANDLING
@@ -153,6 +154,7 @@ function AttestatieApp() {
   const [school,        setSchool]       = useState("");
   const [jaar,          setJaar]         = useState("");
   const [leeftijd,      setLeeftijd]     = useState("");
+  const [richting,      setRichting]     = useState("");
   const [vakken,        setVakken]       = useState<any[]>([]);
   const [gedragAntw,    setGedragAntw]   = useState<any>({});
   const [score,         setScore]        = useState<number | null>(null);
@@ -185,7 +187,15 @@ function AttestatieApp() {
         try {
           const snap = await getDoc(doc(db, "users", fbUser.uid));
           if (snap.exists()) {
-            setCurrentUser({ uid: fbUser.uid, ...snap.data() });
+            const data = snap.data();
+            setCurrentUser({ uid: fbUser.uid, ...data });
+            if (data.school)   setSchool(data.school);
+            if (data.jaar)     setJaar(data.jaar);
+            if (data.leeftijd) setLeeftijd(data.leeftijd);
+            if (data.richting) setRichting(data.richting);
+            if (data.vakken)   setVakken(data.vakken);
+            if (data.gedragAntw) setGedragAntw(data.gedragAntw);
+            if (data.score !== undefined) setScore(data.score);
           } else {
             setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
           }
@@ -436,9 +446,11 @@ function AttestatieApp() {
     const [ls,  setLs]  = useState(school);
     const [lj,  setLj]  = useState(jaar);
     const [ll,  setLl]  = useState(leeftijd);
+    const [lr,  setLr]  = useState(richting);
     const [lv,  setLv]  = useState(vakken.length ? [...vakken] : []);
     const [nv,  setNv]  = useState("");
     const [fout,setFout]= useState("");
+    const [bezig,setBezig] = useState(false);
     const [ocrMsg,  setOcrMsg]  = useState("");
     const [ocrFout, setOcrFout] = useState("");
     const [ocrLoading, setOcrLoading] = useState(false);
@@ -537,11 +549,28 @@ Belangrijk:
       }
     };
 
-    const verder = () => {
-      if (!ls||!lj||!ll) { setFout("Vul school, jaar en leeftijd in!"); return; }
+    const verder = async () => {
+      if (!ls||!lj||!ll||!lr) { setFout("Vul alle schoolgegevens in!"); return; }
       if (!lv.length)    { setFout("Voeg minstens één vak toe!"); return; }
-      setSchool(ls); setJaar(lj); setLeeftijd(ll); setVakken(lv);
-      setScreen("important_subjects");
+      
+      setBezig(true);
+      try {
+        if (currentUser?.uid) {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            ...currentUser,
+            school: ls,
+            jaar: lj,
+            leeftijd: ll,
+            richting: lr,
+            vakken: lv
+          });
+        }
+        setSchool(ls); setJaar(lj); setLeeftijd(ll); setRichting(lr); setVakken(lv);
+        setScreen("important_subjects");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
+      }
+      setBezig(false);
     };
 
     return (
@@ -551,7 +580,7 @@ Belangrijk:
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:52}}>🏫</div>
             <h2 style={S.h2}>Jouw schoolinfo</h2>
-            <p style={S.sub}>Vertel ons iets over jouw school of scan je puntenlijst</p>
+            <p style={S.sub}>Deze gegevens worden opgeslagen in je account.</p>
           </div>
           {fout && <div style={S.err}>{fout}</div>}
 
@@ -575,16 +604,26 @@ Belangrijk:
 
           <label style={S.lbl}>🏫 Naam van je school</label>
           <input style={S.input} value={ls} onChange={e=>setLs(e.target.value)} placeholder="Bv. Atheneum De Kust"/>
-          <label style={S.lbl}>📅 Schooljaar / Graad</label>
-          <select style={{...S.input}} value={lj} onChange={e=>setLj(e.target.value)}>
-            <option value="">Kies je jaar...</option>
-            {["1ste leerjaar","2de leerjaar","3de leerjaar","4de leerjaar","5de leerjaar","6de leerjaar",
-              "1ste middelbaar","2de middelbaar","3de middelbaar","4de middelbaar","5de middelbaar","6de middelbaar"].map(j=>(
-              <option key={j} value={j}>{j}</option>
-            ))}
-          </select>
-          <label style={S.lbl}>🎂 Leeftijd</label>
-          <input style={S.input} type="number" value={ll} onChange={e=>setLl(e.target.value)} placeholder="Bv. 14" min="5" max="25"/>
+          
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <div>
+              <label style={S.lbl}>📅 Jaar / Graad</label>
+              <select style={{...S.input}} value={lj} onChange={e=>setLj(e.target.value)}>
+                <option value="">Kies jaar...</option>
+                {["1ste leerjaar","2de leerjaar","3de leerjaar","4de leerjaar","5de leerjaar","6de leerjaar",
+                  "1ste middelbaar","2de middelbaar","3de middelbaar","4de middelbaar","5de middelbaar","6de middelbaar"].map(j=>(
+                  <option key={j} value={j}>{j}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={S.lbl}>🎂 Leeftijd</label>
+              <input style={S.input} type="number" value={ll} onChange={e=>setLl(e.target.value)} placeholder="Bv. 14" min="5" max="25"/>
+            </div>
+          </div>
+
+          <label style={S.lbl}>🚀 Richting / Afstudeerrichting</label>
+          <input style={S.input} value={lr} onChange={e=>setLr(e.target.value)} placeholder="Bv. Latijn-Wiskunde of Economie"/>
           <label style={S.lbl}>📚 Mijn vakken</label>
           <div style={{display:"flex",gap:8,marginBottom:8}}>
             <input style={{...S.input,margin:0,flex:1}} value={nv}
@@ -614,7 +653,9 @@ Belangrijk:
               </div>
             )}
           </div>
-          <button style={S.btn} onClick={verder}>Verder → Belangrijke vakken ⭐</button>
+          <button style={{...S.btn, opacity: bezig ? 0.7 : 1}} onClick={verder} disabled={bezig}>
+            {bezig ? "⏳ Opslaan..." : "Verder → Belangrijke vakken ⭐"}
+          </button>
         </div>
       </div>
     );
@@ -624,7 +665,23 @@ Belangrijk:
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
     const toggle = (id: number) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
-    const verder = () => { setVakken(lv); setScreen("grades"); };
+    const verder = async () => {
+      try {
+        if (currentUser?.uid) {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            ...currentUser,
+            school,
+            jaar,
+            leeftijd,
+            richting,
+            vakken: lv
+          });
+        }
+        setVakken(lv); setScreen("grades");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
+      }
+    };
     return (
       <div>
         <StapBar huidig="important_subjects"/>
@@ -765,7 +822,23 @@ Belangrijk:
       }
     };
 
-    const verder = () => { setVakken(lv); setScreen("behavior"); };
+    const verder = async () => {
+      try {
+        if (currentUser?.uid) {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            ...currentUser,
+            school,
+            jaar,
+            leeftijd,
+            richting,
+            vakken: lv
+          });
+        }
+        setVakken(lv); setScreen("behavior");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
+      }
+    };
 
     return (
       <div>
@@ -822,11 +895,28 @@ Belangrijk:
     const [la,   setLa]  = useState({...gedragAntw});
     const [fout, setFout]= useState("");
     const set = (id: number, w: number) => setLa({...la,[id]:w});
-    const verder = () => {
+    const verder = async () => {
       if (Object.keys(la).length < CONFIG.gedragsVragen.length) { setFout("Beantwoord alle vragen! 😊"); return; }
-      setGedragAntw(la);
-      setScore(berekenScore(vakken, la));
-      setScreen("results");
+      const s = berekenScore(vakken, la);
+      try {
+        if (currentUser?.uid) {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            ...currentUser,
+            school,
+            jaar,
+            leeftijd,
+            richting,
+            vakken,
+            gedragAntw: la,
+            score: s
+          });
+        }
+        setGedragAntw(la);
+        setScore(s);
+        setScreen("results");
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
+      }
     };
     return (
       <div>
@@ -887,7 +977,7 @@ Belangrijk:
     }, [score]);
 
     const Speedo = ({val}: { val: number }) => {
-      const cx=160,cy=148,R=108;
+      const cx=160,cy=132,R=108;
       const rad=(d: number)=>d*Math.PI/180;
       const pt=(d: number,r: number)=>({x:cx+r*Math.cos(rad(d)),y:cy+r*Math.sin(rad(d))});
       const arc=(a1: number,a2: number,ri: number,ro: number)=>{
@@ -895,11 +985,11 @@ Belangrijk:
         const lg=Math.abs(a2-a1)>180?1:0;
         return `M${s1.x} ${s1.y} A${ro} ${ro} 0 ${lg} 1 ${e1.x} ${e1.y} L${e2.x} ${e2.y} A${ri} ${ri} 0 ${lg} 0 ${s2.x} ${s2.y}Z`;
       };
-      const SA=210,SW=240;
+      const SA=150,SW=240;
       const segs: [number, number, string][] = [[SA,SA+SW*.35,"#EF4444"],[SA+SW*.35,SA+SW*.65,"#F59E0B"],[SA+SW*.65,SA+SW,"#22C55E"]];
       const na=SA+(val/100)*SW, ne=pt(na,R-18);
       return (
-        <svg width="320" height="192" viewBox="0 0 320 192" style={{display:"block",margin:"0 auto"}}>
+        <svg width="320" height="200" viewBox="0 0 320 200" style={{display:"block",margin:"0 auto"}}>
           {segs.map(([a1,a2,c],i)=><path key={i} d={arc(a1,a2,78,113)} fill={c} opacity=".88"/>)}
           <circle cx={cx} cy={cy} r="76" fill="white"/>
           <circle cx={cx} cy={cy} r="74" fill={ORBG}/>
@@ -935,9 +1025,20 @@ Belangrijk:
             ⚠️ Dit is een indicatie. De officiële beslissing ligt altijd bij de school.
           </div>
           <button style={S.btn} onClick={()=>setScreen("breakdown")}>🔍 Hoe is deze score berekend?</button>
-          <button style={S.btnSec} onClick={()=>{setSchool("");setJaar("");setLeeftijd("");setVakken([]);setGedragAntw({});setScore(null);setFeedbackTekst("");setScreen("school_info");}}>
-            🔄 Nieuwe berekening starten
-          </button>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+            <button style={S.btnSec} onClick={()=>setScreen("school_info")}>
+              ⚙️ Gegevens aanpassen
+            </button>
+            <button style={S.btnSec} onClick={()=>{
+              setVakken([]);
+              setGedragAntw({});
+              setScore(null);
+              setFeedbackTekst("");
+              setScreen("school_info");
+            }}>
+              🔄 Nieuwe puntenlijst
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -956,7 +1057,7 @@ Belangrijk:
       try {
         const vakInfo = ingevuld.map(v=>{
           const p=Math.round((parseFloat(v.punt)/parseFloat(v.maxPunt))*100);
-          return `${v.naam}${v.isHoofdvak?" (hoofdvak)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
+          return `${v.naam}${v.isHoofdvak?" (HOOFDVAK ⭐)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
         }).join(", ");
         const gedragInfo = CONFIG.gedragsVragen.map(v=>
           gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
@@ -964,16 +1065,22 @@ Belangrijk:
 
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-        const prompt = `Je bent een vriendelijke Belgische schoolcoach.
-Leerling: ${currentUser?.naam||"Student"}, ${jaar}
-Eindscore: ${score}% → ${attest.label}
-Vakken: ${vakInfo}
-Gedrag: ${gedragInfo}
-Schrijf warm en positief in het Nederlands. Gebruik emoji's.
-1. 🌟 Compliment voor sterkste punten
-2. 💡 2-3 concrete verbeterpunten
-3. 🚀 Motiverende afsluiter
-Max 200 woorden. Spreek leerling direct aan als "jij/je".`;
+        const prompt = `Je bent een deskundige Belgische schoolcoach (CLB-stijl).
+Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
+Eindscore: ${score}% → Attest: ${attest.label}
+
+Context:
+- Punten tellen voor 70%, gedrag voor 30%.
+- Hoofdvakken (⭐) tellen 3x zwaarder dan gewone vakken.
+- Vakken & Scores: ${vakInfo}
+- Gedragsscores: ${gedragInfo}
+
+Schrijf een gerichte, motiverende analyse in het Nederlands. Gebruik Markdown voor structuur.
+1. 📊 **Analyse van je score**: Leg uit waarom de score ${score}% is. Welke vakken (vooral hoofdvakken!) of gedragspunten trekken het gemiddelde omhoog of omlaag?
+2. 🎯 **Waar moet je aan werken?**: Geef 3 héél concrete werkpunten. Prioriteer hoofdvakken met lage scores of negatief gedrag. Wees specifiek (bv. "Je Wiskunde is een hoofdvak en staat op ${ingevuld.find(v=>v.naam.toLowerCase().includes("wiskunde"))?.punt || "?"}/20, dit moet omhoog voor een A-attest").
+3. 🚀 **Motiverende uitsmijter**: Een krachtige zin om de student te activeren.
+
+Houd het onder de 250 woorden. Spreek de leerling direct aan met "je/jij".`;
 
         const response = await ai.models.generateContent({
           model: "gemini-3-flash-preview",
@@ -984,7 +1091,7 @@ Max 200 woorden. Spreek leerling direct aan als "jij/je".`;
         setFb(tekst); setFeedbackTekst(tekst);
       } catch (error) {
         console.error("AI Feedback Error:", error);
-        setFb("Kon geen feedback laden. Probeer opnieuw."); 
+        setFb("Oei, er ging iets mis bij het laden van de feedback. Probeer het nog eens! 🔄"); 
       }
       setFbLoad(false);
     };
@@ -1057,22 +1164,26 @@ Max 200 woorden. Spreek leerling direct aan als "jij/je".`;
         </div>
         <div style={S.card}>
           <div style={{textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:46}}>💡</div>
-            <h2 style={S.h2}>Hoe kan ik hoger scoren?</h2>
-            <p style={S.sub}>Vraag persoonlijke tips en advies op maat!</p>
+            <div style={{fontSize:46,animation:"bounce 1.5s infinite"}}>🎓</div>
+            <h2 style={S.h2}>Persoonlijk Coach-advies</h2>
+            <p style={S.sub}>Gerichte tips om jouw score te verbeteren</p>
           </div>
           {fb ? (
             <div style={{background:`linear-gradient(135deg,${OR}0D,${ORL}08)`,border:`1.5px solid ${OR}2A`,
-              borderRadius:16,padding:20,fontSize:14,lineHeight:1.8,color:"#2D1B00",whiteSpace:"pre-wrap",marginBottom:16}}>
-              {fb}
+              borderRadius:20,padding:24,fontSize:14,lineHeight:1.8,color:"#2D1B00",marginBottom:16,boxShadow:"inset 0 2px 4px rgba(0,0,0,0.02)"}}>
+              <div className="markdown-body">
+                <Markdown>{fb}</Markdown>
+              </div>
             </div>
           ) : (
-            <p style={{...S.sub,textAlign:"center",marginBottom:16,lineHeight:1.7}}>
-              Klik hieronder voor persoonlijke feedback en concrete tips!
-            </p>
+            <div style={{textAlign:"center",padding:"20px 0",background:ORBG,borderRadius:16,marginBottom:16}}>
+              <p style={{...S.sub,margin:0,lineHeight:1.7}}>
+                Klik hieronder voor een diepe analyse van jouw rapport en concrete tips voor de toekomst! ✨
+              </p>
+            </div>
           )}
           <button style={{...S.btn, opacity: fbLoad ? 0.7 : 1, cursor: fbLoad ? "wait" : "pointer"}} onClick={vraagFeedback} disabled={fbLoad}>
-            {fbLoad ? "⏳ Feedback wordt geladen..." : fb ? "🔄 Nieuwe feedback vragen" : "✨ Vraag persoonlijke feedback!"}
+            {fbLoad ? "⏳ De coach analyseert jouw rapport..." : fb ? "🔄 Nieuwe analyse vragen" : "✨ Vraag persoonlijke feedback!"}
           </button>
         </div>
       </div>
@@ -1096,6 +1207,11 @@ Max 200 woorden. Spreek leerling direct aan als "jij/je".`;
         @keyframes bounce { 0%{transform:scale(.6);opacity:0} 60%{transform:scale(1.15)} 100%{transform:scale(1);opacity:1} }
         input:focus { border-color:${OR}!important; }
         button:active { transform:scale(.97)!important; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3 { color: #2D1B00; margin-top: 16px; margin-bottom: 8px; font-weight: 900; }
+        .markdown-body p { margin-bottom: 12px; }
+        .markdown-body ul { padding-left: 20px; margin-bottom: 12px; list-style-type: disc; }
+        .markdown-body li { margin-bottom: 6px; }
+        .markdown-body strong { color: ${OR}; font-weight: 800; }
       `}</style>
       <Blobs/>
       <div style={S.wrap}>
