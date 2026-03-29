@@ -16,6 +16,15 @@ import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
 import Markdown from "react-markdown";
 
+declare global {
+  interface Window {
+    aistudio: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════
 // 🔧 ERROR HANDLING
 // ═══════════════════════════════════════════════════════════════════════
@@ -162,6 +171,7 @@ function AttestatieApp() {
   const [fbLoad,        setFbLoad]       = useState(false);
   const [fbError,       setFbError]      = useState("");
   const [reportImage,   setReportImage]  = useState<string | null>(null);
+  const [hasApiKey,     setHasApiKey]    = useState(true);
 
   interface FeedbackData {
     scoreAnalysis: {
@@ -192,6 +202,24 @@ function AttestatieApp() {
     return cleaned;
   };
 
+  const getApiKey = () => process.env.API_KEY || process.env.GEMINI_API_KEY;
+
+  const checkApiKey = async () => {
+    if (window.aistudio) {
+      const selected = await window.aistudio.hasSelectedApiKey();
+      setHasApiKey(selected || !!process.env.GEMINI_API_KEY);
+    } else {
+      setHasApiKey(!!process.env.GEMINI_API_KEY);
+    }
+  };
+
+  const handleSelectKey = async () => {
+    if (window.aistudio) {
+      await window.aistudio.openSelectKey();
+      setHasApiKey(true);
+    }
+  };
+
   const vraagFeedback = async () => {
     if (score === null) return;
     setFbLoad(true);
@@ -207,8 +235,11 @@ function AttestatieApp() {
       ).filter(Boolean).join("; ");
 
       const attest = getAttest(score);
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Gemini API key is niet geconfigureerd.");
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        setHasApiKey(false);
+        throw new Error("Gemini API key is niet geconfigureerd.");
+      }
 
       const ai = new GoogleGenAI({ apiKey });
 
@@ -239,7 +270,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
       }
 
       const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
+        model: "gemini-3-flash-preview",
         contents: { parts: contents },
         config: {
           responseMimeType: "application/json",
@@ -301,7 +332,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     } catch (error: any) {
       console.error("AI Feedback Error:", error);
       let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
-      if (error?.message?.includes("API key")) msg = "De coach heeft geen toegang tot de AI. Controleer de instellingen.";
+      if (error?.message?.includes("API key")) msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
       setFbError(msg);
     }
     setFbLoad(false);
@@ -309,6 +340,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
 
   // ── Font laden + Firebase auth listener ────────────────────
   useEffect(() => {
+    checkApiKey();
     if (!document.getElementById("nunito-link")) {
       const lnk = document.createElement("link");
       lnk.id   = "nunito-link";
@@ -1182,7 +1214,19 @@ Belangrijk:
             <button style={{...S.btn, background:OR, boxShadow:`0 6px 20px ${OR}66`, height:60, fontSize:18}} onClick={vraagFeedback} disabled={fbLoad}>
               {fbLoad ? "⏳ De coach analyseert jouw rapport..." : fbData ? "🔄 Nieuwe analyse vragen" : "✨ Hoe kan ik het nog beter doen?"}
             </button>
-            {fbError && <div style={{...S.err, marginTop:12, textAlign:"center"}}>{fbError}</div>}
+            {fbError && (
+              <div style={{marginTop:12, textAlign:"center"}}>
+                <div style={{...S.err, marginBottom:8}}>{fbError}</div>
+                {!hasApiKey && (
+                  <button 
+                    style={{...S.btnSec, padding:"8px 16px", fontSize:13}} 
+                    onClick={handleSelectKey}
+                  >
+                    🔑 API Sleutel Instellen
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {fbData && (
