@@ -332,7 +332,10 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     } catch (error: any) {
       console.error("AI Feedback Error:", error);
       let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
-      if (error?.message?.includes("API key")) msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
+      if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
+        msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
+        setHasApiKey(false); // Forceer de knop om te verschijnen
+      }
       setFbError(msg);
     }
     setFbLoad(false);
