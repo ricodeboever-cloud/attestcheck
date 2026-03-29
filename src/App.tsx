@@ -161,6 +161,7 @@ function AttestatieApp() {
   const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
   const [fbLoad,        setFbLoad]       = useState(false);
   const [fbError,       setFbError]      = useState("");
+  const [reportImage,   setReportImage]  = useState<string | null>(null);
 
   interface FeedbackData {
     scoreAnalysis: {
@@ -183,6 +184,14 @@ function AttestatieApp() {
     motivation: string;
   }
 
+  const cleanJSON = (text: string) => {
+    let cleaned = text.trim();
+    if (cleaned.startsWith("```")) {
+      cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
+    }
+    return cleaned;
+  };
+
   const vraagFeedback = async () => {
     if (score === null) return;
     setFbLoad(true);
@@ -198,7 +207,10 @@ function AttestatieApp() {
       ).filter(Boolean).join("; ");
 
       const attest = getAttest(score);
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) throw new Error("Gemini API key is niet geconfigureerd.");
+
+      const ai = new GoogleGenAI({ apiKey });
 
       const prompt = `Je bent een deskundige Belgische schoolcoach.
 Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
@@ -216,9 +228,19 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
 3. betterStudentTips: 3 tips om het "nog beter te doen" (focus op attitude en studiehouding).
 4. motivation: Een korte krachtige uitsmijter.`;
 
+      const contents: any[] = [{ text: prompt }];
+      if (reportImage) {
+        contents.push({
+          inlineData: {
+            mimeType: "image/jpeg",
+            data: reportImage
+          }
+        });
+      }
+
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: [{ parts: [{ text: prompt }] }],
+        model: "gemini-3.1-pro-preview",
+        contents: { parts: contents },
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -269,11 +291,18 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
         }
       });
       
-      const data = JSON.parse(response.text || "{}") as FeedbackData;
+      const text = response.text;
+      if (!text) throw new Error("Geen tekst ontvangen van de coach.");
+      
+      const data = JSON.parse(cleanJSON(text)) as FeedbackData;
+      if (!data.scoreAnalysis || !data.actionPoints) throw new Error("Ongeldige data ontvangen.");
+      
       setFbData(data);
-    } catch (error) {
+    } catch (error: any) {
       console.error("AI Feedback Error:", error);
-      setFbError("Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄");
+      let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
+      if (error?.message?.includes("API key")) msg = "De coach heeft geen toegang tot de AI. Controleer de instellingen.";
+      setFbError(msg);
     }
     setFbLoad(false);
   };
@@ -855,8 +884,15 @@ Belangrijk:
         const reader = new FileReader();
         reader.onload = async (ev) => {
           const b64 = (ev.target?.result as string).split(",")[1];
+          setReportImage(b64);
           
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          const apiKey = process.env.GEMINI_API_KEY;
+          if (!apiKey) {
+            setOcrFout("API key niet gevonden.");
+            setOcrLoading(false);
+            return;
+          }
+          const ai = new GoogleGenAI({ apiKey });
           
           try {
             const response = await ai.models.generateContent({
@@ -908,8 +944,10 @@ Belangrijk:
               }
             });
 
-            const text = response.text || "[]";
-            const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
+            const text = response.text;
+            if (!text) throw new Error("Geen tekst ontvangen.");
+            const extracted = JSON.parse(cleanJSON(text)) as any[];
+            
             setLv(prevLv => {
               const updated = prevLv.map(v => {
                 const match = extracted.find((e: any) =>
