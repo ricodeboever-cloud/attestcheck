@@ -202,21 +202,44 @@ function AttestatieApp() {
     return cleaned;
   };
 
-  const getApiKey = () => process.env.API_KEY || process.env.GEMINI_API_KEY;
+  const getApiKey = () => {
+    try {
+      // @ts-ignore
+      return process.env.API_KEY || process.env.GEMINI_API_KEY || (window as any).API_KEY;
+    } catch (e) {
+      return undefined;
+    }
+  };
 
   const checkApiKey = async () => {
-    if (window.aistudio) {
-      const selected = await window.aistudio.hasSelectedApiKey();
-      setHasApiKey(selected || !!process.env.GEMINI_API_KEY);
-    } else {
-      setHasApiKey(!!process.env.GEMINI_API_KEY);
+    try {
+      if (window.aistudio) {
+        const selected = await window.aistudio.hasSelectedApiKey();
+        setHasApiKey(selected || !!getApiKey());
+      } else {
+        setHasApiKey(!!getApiKey());
+      }
+    } catch (e) {
+      console.error("Error checking API key:", e);
+      setHasApiKey(!!getApiKey());
     }
   };
 
   const handleSelectKey = async () => {
+    console.log("Sleutel selecteren gestart...");
     if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setHasApiKey(true);
+      try {
+        await window.aistudio.openSelectKey();
+        console.log("Sleutel selectie venster geopend.");
+        setHasApiKey(true);
+        setFbError(""); // Wis foutmelding zodat gebruiker opnieuw kan proberen
+      } catch (err) {
+        console.error("Fout bij openen sleutel-venster:", err);
+        setFbError("Kon het venster niet openen. Probeer de pagina te verversen.");
+      }
+    } else {
+      console.warn("window.aistudio niet gevonden");
+      setFbError("AI Studio integratie niet gevonden. Gebruik de app binnen AI Studio.");
     }
   };
 
@@ -1220,14 +1243,22 @@ Belangrijk:
             {fbError && (
               <div style={{marginTop:12, textAlign:"center"}}>
                 <div style={{...S.err, marginBottom:8}}>{fbError}</div>
-                {!hasApiKey && (
+                <div style={{display:"flex", gap:8, justifyContent:"center"}}>
+                  {!hasApiKey && (
+                    <button 
+                      style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
+                      onClick={handleSelectKey}
+                    >
+                      🔑 Sleutel Instellen
+                    </button>
+                  )}
                   <button 
-                    style={{...S.btnSec, padding:"8px 16px", fontSize:13}} 
-                    onClick={handleSelectKey}
+                    style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
+                    onClick={vraagFeedback}
                   >
-                    🔑 API Sleutel Instellen
+                    🔄 Opnieuw Proberen
                   </button>
-                )}
+                </div>
               </div>
             )}
           </div>
