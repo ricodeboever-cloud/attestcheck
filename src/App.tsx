@@ -158,7 +158,125 @@ function AttestatieApp() {
   const [vakken,        setVakken]       = useState<any[]>([]);
   const [gedragAntw,    setGedragAntw]   = useState<any>({});
   const [score,         setScore]        = useState<number | null>(null);
-  const [feedbackTekst, setFeedbackTekst]= useState("");
+  const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
+  const [fbLoad,        setFbLoad]       = useState(false);
+  const [fbError,       setFbError]      = useState("");
+
+  interface FeedbackData {
+    scoreAnalysis: {
+      title: string;
+      impact: "positive" | "negative" | "neutral";
+      description: string;
+      emoji: string;
+    }[];
+    actionPoints: {
+      title: string;
+      description: string;
+      priority: "high" | "medium" | "low";
+      category: "punten" | "gedrag" | "algemeen";
+    }[];
+    betterStudentTips: {
+      title: string;
+      tip: string;
+      emoji: string;
+    }[];
+    motivation: string;
+  }
+
+  const vraagFeedback = async () => {
+    if (score === null) return;
+    setFbLoad(true);
+    setFbError("");
+    try {
+      const ingevuld = vakken.filter(v=>v.punt!==""&&!isNaN(parseFloat(v.punt)));
+      const vakInfo = ingevuld.map(v=>{
+        const p=Math.round((parseFloat(v.punt)/parseFloat(v.maxPunt))*100);
+        return `${v.naam}${v.isHoofdvak?" (HOOFDVAK ⭐)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
+      }).join(", ");
+      const gedragInfo = CONFIG.gedragsVragen.map(v=>
+        gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
+      ).filter(Boolean).join("; ");
+
+      const attest = getAttest(score);
+      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+
+      const prompt = `Je bent een deskundige Belgische schoolcoach.
+Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
+Eindscore: ${score}% → Attest: ${attest.label}
+
+Context:
+- Punten tellen voor 70%, gedrag voor 30%.
+- Hoofdvakken (⭐) tellen 3x zwaarder.
+- Vakken: ${vakInfo}
+- Gedrag: ${gedragInfo}
+
+Geef uitvoerige maar hapklare feedback in JSON formaat.
+1. scoreAnalysis: Waarom is de score ${score}%? Geef 3-4 punten (positief/negatief).
+2. actionPoints: 3 concrete acties om te verbeteren. Prioriteer hoofdvakken.
+3. betterStudentTips: 3 tips om het "nog beter te doen" (focus op attitude en studiehouding).
+4. motivation: Een korte krachtige uitsmijter.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [{ parts: [{ text: prompt }] }],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              scoreAnalysis: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    impact: { type: Type.STRING, enum: ["positive", "negative", "neutral"] },
+                    description: { type: Type.STRING },
+                    emoji: { type: Type.STRING }
+                  },
+                  required: ["title", "impact", "description", "emoji"]
+                }
+              },
+              actionPoints: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    priority: { type: Type.STRING, enum: ["high", "medium", "low"] },
+                    category: { type: Type.STRING, enum: ["punten", "gedrag", "algemeen"] }
+                  },
+                  required: ["title", "description", "priority", "category"]
+                }
+              },
+              betterStudentTips: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    tip: { type: Type.STRING },
+                    emoji: { type: Type.STRING }
+                  },
+                  required: ["title", "tip", "emoji"]
+                }
+              },
+              motivation: { type: Type.STRING }
+            },
+            required: ["scoreAnalysis", "actionPoints", "betterStudentTips", "motivation"]
+          }
+        }
+      });
+      
+      const data = JSON.parse(response.text || "{}") as FeedbackData;
+      setFbData(data);
+    } catch (error) {
+      console.error("AI Feedback Error:", error);
+      setFbError("Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄");
+    }
+    setFbLoad(false);
+  };
 
   // ── Font laden + Firebase auth listener ────────────────────
   useEffect(() => {
@@ -1021,10 +1139,92 @@ Belangrijk:
             <div style={{fontSize:26,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
             <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
           </div>
+          
+          <div style={{marginBottom:20}}>
+            <button style={{...S.btn, background:OR, boxShadow:`0 6px 20px ${OR}66`, height:60, fontSize:18}} onClick={vraagFeedback} disabled={fbLoad}>
+              {fbLoad ? "⏳ De coach analyseert jouw rapport..." : fbData ? "🔄 Nieuwe analyse vragen" : "✨ Hoe kan ik het nog beter doen?"}
+            </button>
+            {fbError && <div style={{...S.err, marginTop:12, textAlign:"center"}}>{fbError}</div>}
+          </div>
+
+          {fbData && (
+            <div style={{display:"flex",flexDirection:"column",gap:24,marginBottom:24,textAlign:"left"}}>
+              {/* Score Analyse Grid */}
+              <div>
+                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <span>📊</span> Waarom deze score?
+                </h3>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                  {fbData.scoreAnalysis.map((item, i) => (
+                    <div key={i} style={{
+                      background: item.impact === "positive" ? "#F0FDF4" : item.impact === "negative" ? "#FEF2F2" : "#F9FAFB",
+                      border: `1px solid ${item.impact === "positive" ? "#DCFCE7" : item.impact === "negative" ? "#FEE2E2" : "#F3F4F6"}`,
+                      borderRadius:14,padding:12,fontSize:12
+                    }}>
+                      <div style={{fontSize:20,marginBottom:6}}>{item.emoji}</div>
+                      <div style={{fontWeight:800,color:"#2D1B00",marginBottom:4}}>{item.title}</div>
+                      <div style={{color:"#4B5563",lineHeight:1.4}}>{item.description}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Actiepunten */}
+              <div>
+                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <span>🎯</span> Jouw Actieplan
+                </h3>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {fbData.actionPoints.map((point, i) => (
+                    <div key={i} style={{
+                      background:"white",border:`1px solid ${point.priority === "high" ? OR : "#E5E7EB"}`,
+                      borderRadius:14,padding:14,display:"flex",gap:12,alignItems:"flex-start",
+                      boxShadow: point.priority === "high" ? `0 4px 12px ${OR}1A` : "none"
+                    }}>
+                      <div style={{
+                        background: point.priority === "high" ? OR : "#F3F4F6",
+                        color: point.priority === "high" ? "white" : "#4B5563",
+                        width:24,height:24,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
+                        fontSize:12,fontWeight:900,flexShrink:0
+                      }}>{i+1}</div>
+                      <div>
+                        <div style={{fontWeight:800,color:"#2D1B00",fontSize:14,marginBottom:2}}>{point.title}</div>
+                        <div style={{fontSize:12,color:"#4B5563",lineHeight:1.5}}>{point.description}</div>
+                        {point.priority === "high" && <span style={{fontSize:10,background:`${OR}1A`,color:OR,padding:"2px 8px",borderRadius:10,fontWeight:800,marginTop:6,display:"inline-block"}}>Hoge Prioriteit ⚡</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Nog beter doen Tips */}
+              <div style={{background:"#2D1B00",borderRadius:20,padding:20,color:"white"}}>
+                <h3 style={{fontWeight:900,color:OR,fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                  <span>✨</span> Het nog beter doen
+                </h3>
+                <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                  {fbData.betterStudentTips.map((tip, i) => (
+                    <div key={i} style={{display:"flex",gap:12,alignItems:"center"}}>
+                      <div style={{fontSize:24}}>{tip.emoji}</div>
+                      <div>
+                        <div style={{fontWeight:800,fontSize:13,color:OR}}>{tip.title}</div>
+                        <div style={{fontSize:11,color:"#D1D5DB",lineHeight:1.4}}>{tip.tip}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{textAlign:"center",padding:10}}>
+                <p style={{fontSize:16,fontWeight:900,color:OR,fontStyle:"italic"}}>"{fbData.motivation}"</p>
+              </div>
+            </div>
+          )}
+
           <div style={{fontSize:12,color:"#8B6242",marginBottom:20,textAlign:"center",fontStyle:"italic",lineHeight:1.5}}>
             ⚠️ Dit is een indicatie. De officiële beslissing ligt altijd bij de school.
           </div>
-          <button style={S.btn} onClick={()=>setScreen("breakdown")}>🔍 Hoe is deze score berekend?</button>
+          <button style={S.btn} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
             <button style={S.btnSec} onClick={()=>setScreen("school_info")}>
               ⚙️ Gegevens aanpassen
@@ -1033,7 +1233,7 @@ Belangrijk:
               setVakken([]);
               setGedragAntw({});
               setScore(null);
-              setFeedbackTekst("");
+              setFbData(null);
               setScreen("school_info");
             }}>
               🔄 Nieuwe puntenlijst
@@ -1044,124 +1244,11 @@ Belangrijk:
     );
   };
 
-  // ── 9. BREAKDOWN + AI FEEDBACK ────────────────────────────
-  interface FeedbackData {
-    scoreAnalysis: {
-      title: string;
-      impact: "positive" | "negative" | "neutral";
-      description: string;
-      emoji: string;
-    }[];
-    actionPoints: {
-      title: string;
-      description: string;
-      priority: "high" | "medium" | "low";
-      category: "punten" | "gedrag" | "algemeen";
-    }[];
-    perfectStudentTips: {
-      title: string;
-      tip: string;
-      emoji: string;
-    }[];
-    motivation: string;
-  }
-
+  // ── 9. BREAKDOWN ────────────────────────────
   const BreakdownScreen = () => {
-    const [fbData, setFbData] = useState<FeedbackData | null>(null);
-    const [fbLoad, setFbLoad] = useState(false);
     const ingevuld = vakken.filter(v=>v.punt!==""&&!isNaN(parseFloat(v.punt)));
     const pctKleur = (p: number) => p>=70?"#22C55E":p>=50?"#F59E0B":"#EF4444";
     const attest   = getAttest(score||0);
-
-    const vraagFeedback = async () => {
-      setFbLoad(true);
-      try {
-        const vakInfo = ingevuld.map(v=>{
-          const p=Math.round((parseFloat(v.punt)/parseFloat(v.maxPunt))*100);
-          return `${v.naam}${v.isHoofdvak?" (HOOFDVAK ⭐)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
-        }).join(", ");
-        const gedragInfo = CONFIG.gedragsVragen.map(v=>
-          gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
-        ).filter(Boolean).join("; ");
-
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-
-        const prompt = `Je bent een deskundige Belgische schoolcoach.
-Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
-Eindscore: ${score}% → Attest: ${attest.label}
-
-Context:
-- Punten tellen voor 70%, gedrag voor 30%.
-- Hoofdvakken (⭐) tellen 3x zwaarder.
-- Vakken: ${vakInfo}
-- Gedrag: ${gedragInfo}
-
-Geef uitvoerige maar hapklare feedback in JSON formaat.
-1. scoreAnalysis: Waarom is de score ${score}%? Geef 3-4 punten (positief/negatief).
-2. actionPoints: 3 concrete acties om te verbeteren. Prioriteer hoofdvakken.
-3. perfectStudentTips: 3 tips om de "perfecte leerling" te worden (focus op attitude en studiehouding).
-4. motivation: Een korte krachtige uitsmijter.`;
-
-        const response = await ai.models.generateContent({
-          model: "gemini-3-flash-preview",
-          contents: [{ parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                scoreAnalysis: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      impact: { type: Type.STRING, enum: ["positive", "negative", "neutral"] },
-                      description: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["title", "impact", "description", "emoji"]
-                  }
-                },
-                actionPoints: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      priority: { type: Type.STRING, enum: ["high", "medium", "low"] },
-                      category: { type: Type.STRING, enum: ["punten", "gedrag", "algemeen"] }
-                    },
-                    required: ["title", "description", "priority", "category"]
-                  }
-                },
-                perfectStudentTips: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      title: { type: Type.STRING },
-                      tip: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["title", "tip", "emoji"]
-                  }
-                },
-                motivation: { type: Type.STRING }
-              },
-              required: ["scoreAnalysis", "actionPoints", "perfectStudentTips", "motivation"]
-            }
-          }
-        });
-        
-        const data = JSON.parse(response.text || "{}") as FeedbackData;
-        setFbData(data);
-      } catch (error) {
-        console.error("AI Feedback Error:", error);
-      }
-      setFbLoad(false);
-    };
 
     let gw=0,tw=0;
     ingevuld.forEach(v=>{const p=(parseFloat(v.punt)/(parseFloat(v.maxPunt)||100))*100;const w=v.isHoofdvak?CONFIG.hoofdvakMultiplier:1;gw+=p*w;tw+=w;});
@@ -1229,114 +1316,6 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
             })}
           </div>
         </div>
-        <div style={S.card}>
-          <div style={{textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:46,animation:"bounce 1.5s infinite"}}>🎓</div>
-            <h2 style={S.h2}>Persoonlijk Coach-advies</h2>
-            <p style={S.sub}>Geen lange teksten, maar actie! ⚡</p>
-          </div>
-
-          {!fbData && !fbLoad && (
-            <div style={{textAlign:"center",padding:"20px 0",background:ORBG,borderRadius:16,marginBottom:16}}>
-              <p style={{...S.sub,margin:0,lineHeight:1.7}}>
-                Klik hieronder voor een visuele analyse en concrete tips om de perfecte leerling te worden! ✨
-              </p>
-            </div>
-          )}
-
-          {fbLoad && (
-            <div style={{textAlign:"center",padding:"40px 0"}}>
-              <div style={{fontSize:42,marginBottom:15,animation:"bounce 1s infinite"}}>🧠</div>
-              <p style={{fontWeight:800,color:OR,fontSize:16}}>De coach stelt jouw actieplan op...</p>
-              <div style={{width:120,height:4,background:"#E5E7EB",borderRadius:2,margin:"12px auto",overflow:"hidden"}}>
-                <div style={{width:"60%",height:"100%",background:OR,animation:"loading 1.5s infinite linear"}}/>
-              </div>
-            </div>
-          )}
-
-          {fbData && !fbLoad && (
-            <div style={{display:"flex",flexDirection:"column",gap:24}}>
-              {/* Score Analyse Grid */}
-              <div>
-                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>📊</span> Waarom deze score?
-                </h3>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-                  {fbData.scoreAnalysis.map((item, i) => (
-                    <div key={i} style={{
-                      background: item.impact === "positive" ? "#F0FDF4" : item.impact === "negative" ? "#FEF2F2" : "#F9FAFB",
-                      border: `1px solid ${item.impact === "positive" ? "#DCFCE7" : item.impact === "negative" ? "#FEE2E2" : "#F3F4F6"}`,
-                      borderRadius:14,padding:12,fontSize:12
-                    }}>
-                      <div style={{fontSize:20,marginBottom:6}}>{item.emoji}</div>
-                      <div style={{fontWeight:800,color:"#2D1B00",marginBottom:4}}>{item.title}</div>
-                      <div style={{color:"#4B5563",lineHeight:1.4}}>{item.description}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Actiepunten */}
-              <div>
-                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>🎯</span> Jouw Actieplan
-                </h3>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {fbData.actionPoints.map((point, i) => (
-                    <div key={i} style={{
-                      background:"white",border:`1px solid ${point.priority === "high" ? OR : "#E5E7EB"}`,
-                      borderRadius:14,padding:14,display:"flex",gap:12,alignItems:"flex-start",
-                      boxShadow: point.priority === "high" ? `0 4px 12px ${OR}1A` : "none"
-                    }}>
-                      <div style={{
-                        background: point.priority === "high" ? OR : "#F3F4F6",
-                        color: point.priority === "high" ? "white" : "#4B5563",
-                        width:24,height:24,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:12,fontWeight:900,flexShrink:0
-                      }}>{i+1}</div>
-                      <div>
-                        <div style={{fontWeight:800,color:"#2D1B00",fontSize:14,marginBottom:2}}>{point.title}</div>
-                        <div style={{fontSize:12,color:"#4B5563",lineHeight:1.5}}>{point.description}</div>
-                        {point.priority === "high" && <span style={{fontSize:10,background:`${OR}1A`,color:OR,padding:"2px 8px",borderRadius:10,fontWeight:800,marginTop:6,display:"inline-block"}}>Hoge Prioriteit ⚡</span>}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Perfecte Leerling Tips */}
-              <div style={{background:"#2D1B00",borderRadius:20,padding:20,color:"white"}}>
-                <h3 style={{fontWeight:900,color:OR,fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>✨</span> Word de Perfecte Leerling
-                </h3>
-                <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  {fbData.perfectStudentTips.map((tip, i) => (
-                    <div key={i} style={{display:"flex",gap:12,alignItems:"center"}}>
-                      <div style={{fontSize:24}}>{tip.emoji}</div>
-                      <div>
-                        <div style={{fontWeight:800,fontSize:13,color:OR}}>{tip.title}</div>
-                        <div style={{fontSize:11,color:"#D1D5DB",lineHeight:1.4}}>{tip.tip}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{textAlign:"center",padding:10}}>
-                <p style={{fontSize:16,fontWeight:900,color:OR,fontStyle:"italic"}}>"{fbData.motivation}"</p>
-                <button style={{...S.btnSec,marginTop:20,fontSize:12,padding:"8px 16px"}} onClick={vraagFeedback}>
-                  🔄 Nieuwe analyse vragen
-                </button>
-              </div>
-            </div>
-          )}
-
-          {!fbData && !fbLoad && (
-            <button style={{...S.btn,background:OR,boxShadow:`0 4px 14px ${OR}44`}} onClick={vraagFeedback}>
-              ✨ Genereer mijn actieplan
-            </button>
-          )}
-        </div>
       </div>
     );
   };
@@ -1349,7 +1328,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   const handleLogout = async () => {
     await signOut(auth);
     setSchool(""); setJaar(""); setLeeftijd(""); setVakken([]);
-    setGedragAntw({}); setScore(null); setFeedbackTekst("");
+    setGedragAntw({}); setScore(null); setFbData(null);
   };
 
   return (
