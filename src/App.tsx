@@ -676,11 +676,18 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
         const reader = new FileReader();
         reader.onload = async (ev) => {
           const b64 = (ev.target?.result as string).split(",")[1];
-          const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+          setReportImage(b64); // Sla de afbeelding op voor de coach later
+          const apiKey = getApiKey();
+          if (!apiKey) {
+            setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
+            setOcrLoading(false);
+            return;
+          }
+          const ai = new GoogleGenAI({ apiKey });
           
           try {
             const response = await ai.models.generateContent({
-              model: "gemini-3.1-pro-preview",
+              model: "gemini-3-flash-preview",
               contents: [
                 {
                   parts: [
@@ -944,9 +951,9 @@ Belangrijk:
           const b64 = (ev.target?.result as string).split(",")[1];
           setReportImage(b64);
           
-          const apiKey = process.env.GEMINI_API_KEY;
+          const apiKey = getApiKey();
           if (!apiKey) {
-            setOcrFout("API key niet gevonden.");
+            setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
             setOcrLoading(false);
             return;
           }
@@ -954,7 +961,7 @@ Belangrijk:
           
           try {
             const response = await ai.models.generateContent({
-              model: "gemini-3.1-pro-preview",
+              model: "gemini-3-flash-preview",
               contents: [
                 {
                   parts: [
@@ -1350,6 +1357,7 @@ Belangrijk:
               setGedragAntw({});
               setScore(null);
               setFbData(null);
+              setReportImage(null);
               setScreen("school_info");
             }}>
               🔄 Nieuwe puntenlijst
@@ -1444,7 +1452,7 @@ Belangrijk:
   const handleLogout = async () => {
     await signOut(auth);
     setSchool(""); setJaar(""); setLeeftijd(""); setVakken([]);
-    setGedragAntw({}); setScore(null); setFbData(null);
+    setGedragAntw({}); setScore(null); setFbData(null); setReportImage(null);
   };
 
   return (
