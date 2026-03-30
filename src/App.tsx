@@ -230,11 +230,24 @@ function AttestatieApp() {
         const selected = await window.aistudio.hasSelectedApiKey();
         setHasApiKey(selected || !!getApiKey());
       } else {
+        // Op de gedeelde URL (Shared App URL) is window.aistudio niet beschikbaar.
+        // We vertrouwen hier op de omgevingsvariabelen die via Vite zijn geinjecteerd.
         setHasApiKey(!!getApiKey());
       }
     } catch (e) {
       console.error("Error checking API key:", e);
       setHasApiKey(!!getApiKey());
+    }
+  };
+
+  const [authError, setAuthError] = useState("");
+
+  const handleAuthError = (error: any) => {
+    console.error("Auth Error:", error);
+    if (error.code === "auth/unauthorized-domain") {
+      setAuthError("Dit domein is niet geautoriseerd in Firebase. Voeg de Shared App URL toe aan 'Authorized domains' in de Firebase Console.");
+    } else {
+      setAuthError("Er ging iets mis bij het inloggen: " + (error.message || "Onbekende fout"));
     }
   };
 
@@ -588,6 +601,7 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
       if (!discl)   { setFout("Bevestig dat je begrijpt dat dit een indicatie is"); return; }
       if (ww.length < 6) { setFout("Wachtwoord moet minstens 6 tekens zijn"); return; }
       setBezig(true);
+      setAuthError("");
       try {
         const cred = await createUserWithEmailAndPassword(auth, email, ww);
         const userPath = `users/${cred.user.uid}`;
@@ -600,7 +614,7 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
         setBezig(false);
         if (e.code === "auth/email-already-in-use") setFout("Dit e-mailadres is al in gebruik!");
         else if (e.code === "auth/invalid-email")   setFout("Ongeldig e-mailadres");
-        else setFout("Er ging iets mis: " + e.message);
+        else handleAuthError(e);
       }
     };
 
@@ -614,6 +628,12 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
             <p style={S.sub}>Maak een account om je voortgang bij te houden</p>
           </div>
           {fout && <div style={S.err}>{fout}</div>}
+          {authError && (
+            <div style={{...S.err, background: "#FEF3C7", color: "#92400E", border: "1px solid #FCD34D"}}>
+              <p style={{fontWeight: 800, marginBottom: 4}}>⚠️ Belangrijk:</p>
+              <p style={{fontSize: 12}}>{authError}</p>
+            </div>
+          )}
           <label style={S.lbl}>Voornaam</label>
           <input style={S.input} value={naam} onChange={e=>setNaam(e.target.value)} placeholder="Jouw voornaam"/>
           <label style={S.lbl}>E-mailadres</label>
@@ -657,11 +677,16 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
     const login = async () => {
       if (!email || !ww) { setFout("Vul e-mail en wachtwoord in"); return; }
       setBezig(true);
+      setAuthError("");
       try {
         await signInWithEmailAndPassword(auth, email, ww);
-      } catch (e) {
+      } catch (e: any) {
         setBezig(false);
-        setFout("E-mail of wachtwoord klopt niet 🔑");
+        if (e.code === "auth/wrong-password" || e.code === "auth/user-not-found" || e.code === "auth/invalid-credential") {
+          setFout("E-mail of wachtwoord klopt niet 🔑");
+        } else {
+          handleAuthError(e);
+        }
       }
     };
 
@@ -675,6 +700,12 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
             <p style={S.sub}>Log in om verder te gaan</p>
           </div>
           {fout && <div style={S.err}>{fout}</div>}
+          {authError && (
+            <div style={{...S.err, background: "#FEF3C7", color: "#92400E", border: "1px solid #FCD34D"}}>
+              <p style={{fontWeight: 800, marginBottom: 4}}>⚠️ Belangrijk:</p>
+              <p style={{fontSize: 12}}>{authError}</p>
+            </div>
+          )}
           <label style={S.lbl}>E-mailadres</label>
           <input style={S.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="naam@voorbeeld.be"/>
           <label style={S.lbl}>Wachtwoord</label>
