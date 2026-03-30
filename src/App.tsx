@@ -483,32 +483,66 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
       minHeight:"100vh",
       background:`linear-gradient(150deg,${ORBG} 0%,#FFFBF5 50%,${ORPL} 100%)`,
       display:"flex", flexDirection:"column", alignItems:"center",
-      padding:0, position:"relative", overflow:"hidden",
+      padding:0, position:"relative", overflowX:"hidden",
     },
-    wrap: { width:"100%", maxWidth:460, padding:"16px 16px 48px", position:"relative", zIndex: 1 },
-    card: { background:"white", borderRadius:24, padding:"24px 22px", boxShadow:`0 8px 32px rgba(244,121,32,.15)`, marginBottom:16 },
+    wrap: { 
+      width:"100%", 
+      maxWidth:460, 
+      padding:"env(safe-area-inset-top, 16px) 16px calc(env(safe-area-inset-bottom, 16px) + 48px)", 
+      position:"relative", 
+      zIndex: 1,
+      boxSizing: "border-box"
+    },
+    card: { 
+      background:"white", 
+      borderRadius:28, 
+      padding:"28px 24px", 
+      boxShadow:`0 12px 40px rgba(244,121,32,.12)`, 
+      marginBottom:20,
+      border: "1px solid rgba(244,121,32,.05)"
+    },
     btn: {
-      width:"100%", padding:"16px", background:`linear-gradient(135deg,${OR},${ORL})`,
-      color:"white", border:"none", borderRadius:16, fontSize:17, fontWeight:800,
-      fontFamily:"inherit", cursor:"pointer", boxShadow:`0 6px 20px ${OR}44`,
-      marginBottom:12, display:"block", textAlign:"center", letterSpacing:".4px", transition:"transform .1s",
+      width:"100%", padding:"18px", background:`linear-gradient(135deg,${OR},${ORL})`,
+      color:"white", border:"none", borderRadius:20, fontSize:18, fontWeight:800,
+      fontFamily:"inherit", cursor:"pointer", boxShadow:`0 8px 24px ${OR}44`,
+      marginBottom:14, display:"block", textAlign:"center", letterSpacing:".4px", transition:"all .2s",
+      userSelect: "none",
+      WebkitTapHighlightColor: "transparent",
     },
     btnSec: {
-      width:"100%", padding:"14px", background:"transparent", color:OR,
-      border:`2px solid ${OR}`, borderRadius:16, fontSize:15, fontWeight:700,
-      fontFamily:"inherit", cursor:"pointer", marginBottom:12, display:"block", textAlign:"center",
+      width:"100%", padding:"16px", background:"white", color:OR,
+      border:`2px solid ${ORPL}`, borderRadius:20, fontSize:16, fontWeight:700,
+      fontFamily:"inherit", cursor:"pointer", marginBottom:14, display:"block", textAlign:"center",
+      transition: "all .2s",
+      userSelect: "none",
+      WebkitTapHighlightColor: "transparent",
     },
     input: {
-      width:"100%", padding:"13px 15px", border:`2px solid ${ORPL}`,
-      borderRadius:12, fontSize:15, fontFamily:"inherit", outline:"none",
-      marginBottom:12, boxSizing:"border-box", color:"#2D1B00", background:"white", transition:"border-color .2s",
+      width:"100%", padding:"15px 18px", border:`2px solid ${ORPL}`,
+      borderRadius:16, fontSize:16, fontFamily:"inherit", outline:"none",
+      marginBottom:14, boxSizing:"border-box", color:"#2D1B00", background:"#FAFAFA", transition:"all .2s",
     },
     lbl:  { fontSize:13, fontWeight:700, color:ORD, marginBottom:5, display:"block" },
     h2:   { fontSize:21, fontWeight:800, color:"#2D1B00", margin:"0 0 6px" },
     sub:  { fontSize:13, color:"#8B6242", lineHeight:1.5 },
     err:  { background:"#FEE2E2", color:"#DC2626", padding:"10px 14px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:12 },
     ok:   { background:"#DCFCE7", color:"#15803D", padding:"10px 14px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:12 },
-    back: { background:"none", border:"none", fontSize:22, cursor:"pointer", marginBottom:10, color:ORD, fontFamily:"inherit", fontWeight:700, padding:0 },
+    back: { 
+      background:"white", 
+      border:`1px solid ${ORPL}`, 
+      fontSize:14, 
+      cursor:"pointer", 
+      marginBottom:16, 
+      color:ORD, 
+      fontFamily:"inherit", 
+      fontWeight:800, 
+      padding:"8px 16px",
+      borderRadius:12,
+      display:"inline-flex",
+      alignItems:"center",
+      gap:6,
+      boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
+    },
   };
 
   const Blobs = () => (
@@ -525,16 +559,24 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     const idx = stpIdx[huidig] ?? -1;
     if (idx < 0) return null;
     return (
-      <div style={{display:"flex",justifyContent:"center",gap:6,marginBottom:18}}>
+      <div style={{display:"flex",justifyContent:"center",gap:8,marginBottom:24,padding:"0 4px"}}>
         {stappen.map((em,i) => (
           <div key={i} style={{
-            width:34,height:34,borderRadius:"50%",
-            background: i <= idx ? OR : "#E5E7EB",
+            flex:1,
+            height:42,
+            borderRadius:14,
+            background: i <= idx ? `linear-gradient(135deg,${OR},${ORL})` : "white",
             color: i <= idx ? "white" : "#9CA3AF",
-            fontSize: i <= idx ? 16 : 13,
-            fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center",
-            boxShadow: i === idx ? `0 4px 14px ${OR}44` : "none",
-            transition:"all .3s",
+            fontSize: i <= idx ? 18 : 14,
+            fontWeight:800, 
+            display:"flex", 
+            alignItems:"center", 
+            justifyContent:"center",
+            boxShadow: i === idx ? `0 6px 16px ${OR}44` : "0 2px 8px rgba(0,0,0,0.05)",
+            border: i <= idx ? "none" : `1px solid ${ORPL}`,
+            transition:"all .4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+            transform: i === idx ? "scale(1.1)" : "scale(1)",
+            zIndex: i === idx ? 2 : 1
           }}>
             {i < idx ? "✓" : em}
           </div>
@@ -1349,7 +1391,7 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
 
       const na=SA+(visualPercent/100)*SW, ne=pt(na,R-18);
       return (
-        <svg width="320" height="200" viewBox="0 0 320 200" style={{display:"block",margin:"0 auto"}}>
+        <svg width="100%" height="auto" viewBox="0 0 320 200" style={{display:"block",margin:"0 auto",maxWidth:320}}>
           {segs.map(([a1,a2,c],i)=><path key={i} d={arc(a1,a2,78,113)} fill={c} opacity=".88"/>)}
           <circle cx={cx} cy={cy} r="76" fill="white"/>
           <circle cx={cx} cy={cy} r="74" fill={ORBG}/>
@@ -1420,7 +1462,7 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
                 <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
                   <span>📊</span> Waarom deze score?
                 </h3>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:12}}>
                   {fbData.scoreAnalysis.map((item, i) => (
                     <div key={i} style={{
                       background: item.impact === "positive" ? "#F0FDF4" : item.impact === "negative" ? "#FEF2F2" : "#F9FAFB",
@@ -1710,24 +1752,24 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
       `}</style>
       <Blobs/>
       <FeedbackModal/>
-      <div style={S.wrap}>
+      <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontWeight:900,color:OR,fontSize:18}}>📊 RapportRadar</div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+            <div style={{fontWeight:900,color:OR,fontSize:16}}>📊 RapportRadar</div>
+            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
               <button 
                 onClick={() => setShowFeedback(true)}
                 style={{
                   background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
-                  padding:"6px 12px", fontSize:13, fontWeight:700, color:ORD, cursor:"pointer"
+                  padding:"5px 10px", fontSize:12, fontWeight:700, color:ORD, cursor:"pointer"
                 }}
               >💡 Feedback</button>
-              <div style={{fontSize:13,color:"#8B6242",background:ORBG,padding:"6px 12px",borderRadius:20,fontWeight:700}}>
+              <div style={{fontSize:12,color:"#8B6242",background:ORBG,padding:"5px 10px",borderRadius:20,fontWeight:700}}>
                 👋 {currentUser.naam}
               </div>
               <button onClick={handleLogout} style={{
                 background:"none",border:`1.5px solid #E5E7EB`,borderRadius:10,
-                color:"#8B6242",fontSize:12,fontWeight:700,cursor:"pointer",padding:"6px 10px",fontFamily:"inherit",
+                color:"#8B6242",fontSize:11,fontWeight:700,cursor:"pointer",padding:"5px 8px",fontFamily:"inherit",
               }}>Uitloggen</button>
             </div>
           </div>
