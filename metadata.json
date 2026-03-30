@@ -1,5 +1,5 @@
 {
-  "name": "AttestatieCheck",
+  "name": "RapportRadar",
   "description": "Ontdek welk attest je op dit moment zou krijgen op basis van je punten en gedrag.",
   "requestFramePermissions": [
     "camera"

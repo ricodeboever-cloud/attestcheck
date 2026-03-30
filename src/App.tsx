@@ -10,7 +10,10 @@ import {
   doc, 
   setDoc, 
   getDoc, 
-  getDocFromServer 
+  getDocFromServer,
+  collection,
+  addDoc,
+  serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -128,16 +131,16 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 // 🔧 ADMIN CONFIGURATIE — Pas hier de gewichten en vragen aan!
 // ═══════════════════════════════════════════════════════════════════════
 const CONFIG = {
-  hoofdvakMultiplier: 2,
-  gedragGewicht: 0.20,
-  puntenGewicht: 0.80,
+  hoofdvakMultiplier: 3,
+  gedragGewicht: 0.12,
+  puntenGewicht: 0.88,
   attestA_drempel: 70,
   attestB_drempel: 50,
   gedragsVragen: [
     { id: 1, vraag: "Hoe vaak kom ik op tijd naar school?",      emoji: "⏰" },
     { id: 2, vraag: "Hoe goed maak ik mijn huiswerk?",           emoji: "📚" },
     { id: 3, vraag: "Hoe goed gedraag ik mij in de klas?",       emoji: "😊" },
-    { id: 4, vraag: "Hoe goed werk ik samen met anderen?",       emoji: "🤝" },
+    { id: 4, vraag: "Als iemand mij kritiek geeft, reageer ik meestal rustig en denk ik erover na.", emoji: "🤝" },
     { id: 5, vraag: "Hoe regelmatig ben ik aanwezig op school?", emoji: "🏫" },
     { id: 6, vraag: "Hoe goed luister ik naar de leerkracht?",   emoji: "👂" },
   ],
@@ -147,6 +150,10 @@ const CONFIG = {
     { waarde: 3, label: "Vaak",         emoji: "🙂" },
     { waarde: 4, label: "Bijna altijd", emoji: "😄" },
     { waarde: 5, label: "Altijd",       emoji: "🌟" },
+  ],
+  nederlandsVragen: [
+    { id: "schrijven", vraag: "Kan ik vlot Nederlandse zinnen schrijven?", emoji: "✍️" },
+    { id: "spreken",   vraag: "Kan ik vlot Nederlandse zinnen spreken?",   emoji: "🗣️" },
   ],
 };
 
@@ -166,12 +173,18 @@ function AttestatieApp() {
   const [richting,      setRichting]     = useState("");
   const [vakken,        setVakken]       = useState<any[]>([]);
   const [gedragAntw,    setGedragAntw]   = useState<any>({});
+  const [nederlandsAntw, setNederlandsAntw] = useState<any>({});
   const [score,         setScore]        = useState<number | null>(null);
   const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
   const [fbLoad,        setFbLoad]       = useState(false);
   const [fbError,       setFbError]      = useState("");
   const [reportImage,   setReportImage]  = useState<string | null>(null);
   const [hasApiKey,     setHasApiKey]    = useState(true);
+  const [showFeedback,  setShowFeedback] = useState(false);
+  const [feedbackMsg,   setFeedbackMsg]  = useState("");
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackLoading, setFeedbackLoading] = useState(false);
+  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   interface FeedbackData {
     scoreAnalysis: {
@@ -257,6 +270,10 @@ function AttestatieApp() {
         gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
       ).filter(Boolean).join("; ");
 
+      const nedInfo = CONFIG.nederlandsVragen.map(v=>
+        nederlandsAntw[v.id]?`${v.vraag}: ${nederlandsAntw[v.id]}`:""
+      ).filter(Boolean).join("; ");
+
       const attest = getAttest(score);
       const apiKey = getApiKey();
       if (!apiKey) {
@@ -271,8 +288,9 @@ Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
 Eindscore: ${score}% → Attest: ${attest.label}
 
 Context:
-- Punten tellen voor 70%, gedrag voor 30%.
+- Punten tellen voor 88%, gedrag voor 12%.
 - Hoofdvakken (⭐) tellen 3x zwaarder.
+- Nederlands niveau (impact +/- 3%): ${nedInfo}
 - Vakken: ${vakInfo}
 - Gedrag: ${gedragInfo}
 
@@ -400,6 +418,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
             if (data.richting) setRichting(data.richting);
             if (data.vakken)   setVakken(data.vakken);
             if (data.gedragAntw) setGedragAntw(data.gedragAntw);
+            if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
             if (data.score !== undefined) setScore(data.score);
           } else {
             setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
@@ -417,7 +436,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   }, []);
 
   // ── Score berekening ───────────────────────────────────────
-  const berekenScore = (vakkenData: any[], antwoorden: any) => {
+  const berekenScore = (vakkenData: any[], antwoorden: any, nedAntw: any) => {
     const ingevuld = vakkenData.filter(v => v.punt !== "" && !isNaN(parseFloat(v.punt)));
     if (!ingevuld.length) return 0;
     let gew = 0, totGew = 0;
@@ -433,7 +452,14 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
       if (antwoorden[v.id] !== undefined) { gtot += (antwoorden[v.id] / 5) * 100; gaan++; }
     });
     const gedragScore = gaan ? gtot / gaan : 60;
-    return Math.round((puntScore * CONFIG.puntenGewicht + gedragScore * CONFIG.gedragGewicht) * 10) / 10;
+    
+    let baseScore = (puntScore * CONFIG.puntenGewicht + gedragScore * CONFIG.gedragGewicht);
+    
+    // Nederlands impact: +/- 1.5% per vraag (totaal +/- 3%)
+    if (nedAntw.schrijven === "ja") baseScore += 1.5; else if (nedAntw.schrijven === "nee") baseScore -= 1.5;
+    if (nedAntw.spreken === "ja")   baseScore += 1.5; else if (nedAntw.spreken === "nee")   baseScore -= 1.5;
+
+    return Math.round(Math.max(0, Math.min(100, baseScore)) * 10) / 10;
   };
 
   const getAttest = (s: number) => {
@@ -520,7 +546,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   const WelcomeScreen = () => (
     <div style={{textAlign:"center",paddingTop:60}}>
       <div style={{fontSize:76,marginBottom:12}}>📊</div>
-      <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>AttestatieCheck</h1>
+      <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
       <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
         Ontdek welk attest je op dit moment zou krijgen! 🎓
       </p>
@@ -707,6 +733,7 @@ Geef het resultaat terug als een JSON array van objecten:
 
 Belangrijk:
 - Negeer titels, datums of andere tekst die geen vaknaam is.
+- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
 - Als een vak geen punt heeft, laat "punt" leeg ("").
 - Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
                     }
@@ -986,6 +1013,7 @@ Geef het resultaat terug als een JSON array van objecten:
 
 Belangrijk:
 - Negeer titels, datums of andere tekst die geen vaknaam is.
+- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
 - Als een vak geen punt heeft, laat "punt" leeg ("").
 - Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
                     }
@@ -1114,11 +1142,16 @@ Belangrijk:
   // ── 7. GEDRAGSVRAGEN ───────────────────────────────────────
   const BehaviorScreen = () => {
     const [la,   setLa]  = useState({...gedragAntw});
+    const [ln,   setLn]  = useState({...nederlandsAntw});
     const [fout, setFout]= useState("");
     const set = (id: number, w: number) => setLa({...la,[id]:w});
+    const setNed = (id: string, w: string) => setLn({...ln,[id]:w});
+
     const verder = async () => {
-      if (Object.keys(la).length < CONFIG.gedragsVragen.length) { setFout("Beantwoord alle vragen! 😊"); return; }
-      const s = berekenScore(vakken, la);
+      if (Object.keys(la).length < CONFIG.gedragsVragen.length) { setFout("Beantwoord alle gedragsvragen! 😊"); return; }
+      if (Object.keys(ln).length < CONFIG.nederlandsVragen.length) { setFout("Beantwoord de vragen over je Nederlands! 🇳🇱"); return; }
+      
+      const s = berekenScore(vakken, la, ln);
       try {
         if (currentUser?.uid) {
           await setDoc(doc(db, "users", currentUser.uid), {
@@ -1129,10 +1162,12 @@ Belangrijk:
             richting,
             vakken,
             gedragAntw: la,
+            nederlandsAntw: ln,
             score: s
           });
         }
         setGedragAntw(la);
+        setNederlandsAntw(ln);
         setScore(s);
         setScreen("results");
       } catch (error) {
@@ -1146,10 +1181,12 @@ Belangrijk:
         <div style={S.card}>
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:52}}>😊</div>
-            <h2 style={S.h2}>Hoe gedraag jij je op school?</h2>
-            <p style={S.sub}>Je gedrag heeft ook invloed op je attest! Wees eerlijk 😉</p>
+            <h2 style={S.h2}>Attitude & Nederlands</h2>
+            <p style={S.sub}>Je houding en taalvaardigheid tellen ook mee! Wees eerlijk 😉</p>
           </div>
           {fout && <div style={S.err}>{fout}</div>}
+          
+          {/* Gedragsvragen */}
           {CONFIG.gedragsVragen.map(vraag=>(
             <div key={vraag.id} style={{background:ORBG,borderRadius:16,padding:16,marginBottom:12}}>
               <p style={{fontWeight:800,fontSize:15,color:"#2D1B00",margin:"0 0 12px"}}>{vraag.emoji} {vraag.vraag}</p>
@@ -1171,8 +1208,35 @@ Belangrijk:
               </div>
             </div>
           ))}
+
+          {/* Nederlands Niveau */}
+          <div style={{marginTop:24, marginBottom:16}}>
+            <h3 style={{fontWeight:900, color:ORD, fontSize:16, marginBottom:12, display:"flex", alignItems:"center", gap:8}}>
+              <span>🇳🇱</span> Niveau Nederlands
+            </h3>
+            {CONFIG.nederlandsVragen.map(vraag => (
+              <div key={vraag.id} style={{background:"white", border:`2px solid ${ORPL}`, borderRadius:16, padding:16, marginBottom:12}}>
+                <p style={{fontWeight:800, fontSize:14, color:"#2D1B00", margin:"0 0 12px"}}>{vraag.emoji} {vraag.vraag}</p>
+                <div style={{display:"flex", gap:10}}>
+                  {["ja", "nee"].map(opt => (
+                    <button key={opt} onClick={() => setNed(vraag.id, opt)} style={{
+                      flex:1, padding:"10px",
+                      background: ln[vraag.id] === opt ? (opt === "ja" ? "#22C55E" : "#EF4444") : "white",
+                      color: ln[vraag.id] === opt ? "white" : "#4B5563",
+                      border: `2px solid ${ln[vraag.id] === opt ? (opt === "ja" ? "#22C55E" : "#EF4444") : "#E5E7EB"}`,
+                      borderRadius:12, cursor:"pointer", fontFamily:"inherit", fontWeight:800,
+                      textTransform:"uppercase", fontSize:13, transition:"all .2s"
+                    }}>
+                      {opt === "ja" ? "✅ Ja" : "❌ Nee"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
           <div style={{background:"#FEF3C7",borderRadius:12,padding:"12px 14px",marginBottom:20,fontSize:13,color:"#92400E"}}>
-            💡 Gedrag telt voor <strong>{Math.round(CONFIG.gedragGewicht*100)}%</strong> mee in je eindscore.
+            💡 Gedrag telt voor <strong>{Math.round(CONFIG.gedragGewicht*100)}%</strong> mee. Je Nederlands kan je score met <strong>3%</strong> verhogen of verlagen.
           </div>
           <button style={S.btn} onClick={verder}>🎯 Bekijk mijn resultaat!</button>
         </div>
@@ -1207,8 +1271,23 @@ Belangrijk:
         return `M${s1.x} ${s1.y} A${ro} ${ro} 0 ${lg} 1 ${e1.x} ${e1.y} L${e2.x} ${e2.y} A${ri} ${ri} 0 ${lg} 0 ${s2.x} ${s2.y}Z`;
       };
       const SA=150,SW=240;
-      const segs: [number, number, string][] = [[SA,SA+SW*.35,"#EF4444"],[SA+SW*.35,SA+SW*.65,"#F59E0B"],[SA+SW*.65,SA+SW,"#22C55E"]];
-      const na=SA+(val/100)*SW, ne=pt(na,R-18);
+      const segs: [number, number, string][] = [
+        [SA, SA + SW * (1/3), "#EF4444"], // C: Visueel 1/3
+        [SA + SW * (1/3), SA + SW * (2/3), "#F59E0B"], // B: Visueel 1/3
+        [SA + SW * (2/3), SA + SW, "#22C55E"] // A: Visueel 1/3
+      ];
+
+      // Non-lineaire mapping van score naar visuele positie op de meter
+      let visualPercent = 0;
+      if (val <= CONFIG.attestB_drempel) {
+        visualPercent = (val / CONFIG.attestB_drempel) * 33.33;
+      } else if (val <= CONFIG.attestA_drempel) {
+        visualPercent = 33.33 + ((val - CONFIG.attestB_drempel) / (CONFIG.attestA_drempel - CONFIG.attestB_drempel)) * 33.33;
+      } else {
+        visualPercent = 66.66 + ((val - CONFIG.attestA_drempel) / (100 - CONFIG.attestA_drempel)) * 33.34;
+      }
+
+      const na=SA+(visualPercent/100)*SW, ne=pt(na,R-18);
       return (
         <svg width="320" height="200" viewBox="0 0 320 200" style={{display:"block",margin:"0 auto"}}>
           {segs.map(([a1,a2,c],i)=><path key={i} d={arc(a1,a2,78,113)} fill={c} opacity=".88"/>)}
@@ -1216,7 +1295,11 @@ Belangrijk:
           <circle cx={cx} cy={cy} r="74" fill={ORBG}/>
           {[0,25,50,75,100].map(v=>{const a=SA+(v/100)*SW;const p1=pt(a,78),p2=pt(a,96);return <line key={v} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="white" strokeWidth="2"/>;
           })}
-          {[{p:.17,l:"C",c:"#EF4444"},{p:.50,l:"B",c:"#F59E0B"},{p:.83,l:"A",c:"#22C55E"}].map(({p,l,c})=>{
+          {[
+            {p: 1/6, l:"C", c:"#EF4444"}, 
+            {p: 1/2, l:"B", c:"#F59E0B"}, 
+            {p: 5/6, l:"A", c:"#22C55E"}
+          ].map(({p,l,c})=>{
             const pos=pt(SA+p*SW,R+22);return <text key={l} x={pos.x} y={pos.y} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize="15" fontWeight="900" fontFamily="Nunito,sans-serif">{l}</text>;
           })}
           <text x={cx} y={cy-10} textAnchor="middle" fontSize="38" fontWeight="900" fill="#2D1B00" fontFamily="Nunito,sans-serif">{val}%</text>
@@ -1355,6 +1438,7 @@ Belangrijk:
             <button style={S.btnSec} onClick={()=>{
               setVakken([]);
               setGedragAntw({});
+              setNederlandsAntw({});
               setScore(null);
               setFbData(null);
               setReportImage(null);
@@ -1444,6 +1528,102 @@ Belangrijk:
     );
   };
 
+  // ── 9. FEEDBACK MODAL ───────────────────────────
+  const FeedbackModal = () => {
+    if (!showFeedback) return null;
+
+    const submitFeedback = async () => {
+      if (!feedbackMsg.trim()) return;
+      setFeedbackLoading(true);
+      try {
+        await addDoc(collection(db, "feedback"), {
+          userId: currentUser?.uid || "anonymous",
+          userEmail: currentUser?.email || "anonymous",
+          userName: currentUser?.naam || "anonymous",
+          message: feedbackMsg,
+          rating: feedbackRating,
+          timestamp: serverTimestamp()
+        });
+        setFeedbackSuccess(true);
+        setTimeout(() => {
+          setShowFeedback(false);
+          setFeedbackSuccess(false);
+          setFeedbackMsg("");
+          setFeedbackRating(0);
+        }, 2000);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, "feedback");
+      } finally {
+        setFeedbackLoading(false);
+      }
+    };
+
+    return (
+      <div style={{
+        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000,
+        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+        backdropFilter:"blur(4px)"
+      }}>
+        <div style={{...S.card, width:"100%", maxWidth:400, position:"relative", animation:"bounce .3s ease"}}>
+          <button 
+            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
+            onClick={() => setShowFeedback(false)}
+          >✕</button>
+          
+          <div style={{textAlign:"center", marginBottom:20}}>
+            <div style={{fontSize:40, marginBottom:8}}>💡</div>
+            <h2 style={S.h2}>Laat ons weten wat je vindt!</h2>
+            <p style={S.sub}>Jouw feedback helpt ons RapportRadar te verbeteren.</p>
+          </div>
+
+          {feedbackSuccess ? (
+            <div style={{...S.ok, textAlign:"center", padding:20}}>
+              <div style={{fontSize:30, marginBottom:10}}>✨</div>
+              Bedankt voor je feedback!
+            </div>
+          ) : (
+            <>
+              <div style={{marginBottom:16}}>
+                <label style={S.lbl}>Hoe tevreden ben je? (optioneel)</label>
+                <div style={{display:"flex", justifyContent:"center", gap:10, marginTop:8}}>
+                  {[1,2,3,4,5].map(star => (
+                    <button 
+                      key={star} 
+                      onClick={() => setFeedbackRating(star)}
+                      style={{
+                        background:"none", border:"none", fontSize:28, cursor:"pointer",
+                        filter: feedbackRating >= star ? "none" : "grayscale(100%) opacity(0.3)",
+                        transition:"all .2s"
+                      }}
+                    >⭐</button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{marginBottom:20}}>
+                <label style={S.lbl}>Wat kan er beter?</label>
+                <textarea 
+                  style={{...S.input, height:120, resize:"none", marginTop:4}}
+                  placeholder="Typ hier je suggesties of opmerkingen..."
+                  value={feedbackMsg}
+                  onChange={(e) => setFeedbackMsg(e.target.value)}
+                />
+              </div>
+
+              <button 
+                style={{...S.btn, opacity: feedbackMsg.trim() ? 1 : 0.5}} 
+                onClick={submitFeedback}
+                disabled={feedbackLoading || !feedbackMsg.trim()}
+              >
+                {feedbackLoading ? "⏳ Verzenden..." : "Verzenden 🚀"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════
@@ -1452,7 +1632,7 @@ Belangrijk:
   const handleLogout = async () => {
     await signOut(auth);
     setSchool(""); setJaar(""); setLeeftijd(""); setVakken([]);
-    setGedragAntw({}); setScore(null); setFbData(null); setReportImage(null);
+    setGedragAntw({}); setNederlandsAntw({}); setScore(null); setFbData(null); setReportImage(null);
   };
 
   return (
@@ -1469,11 +1649,19 @@ Belangrijk:
         .markdown-body strong { color: ${OR}; font-weight: 800; }
       `}</style>
       <Blobs/>
+      <FeedbackModal/>
       <div style={S.wrap}>
         {!geenHeader.includes(screen) && currentUser && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontWeight:900,color:OR,fontSize:18}}>📊 AttestatieCheck</div>
+            <div style={{fontWeight:900,color:OR,fontSize:18}}>📊 RapportRadar</div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button 
+                onClick={() => setShowFeedback(true)}
+                style={{
+                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
+                  padding:"6px 12px", fontSize:13, fontWeight:700, color:ORD, cursor:"pointer"
+                }}
+              >💡 Feedback</button>
               <div style={{fontSize:13,color:"#8B6242",background:ORBG,padding:"6px 12px",borderRadius:20,fontWeight:700}}>
                 👋 {currentUser.naam}
               </div>

@@ -54,12 +54,30 @@
         }
       },
       "required": ["naam", "email"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "User feedback about the application",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "userName": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "rating": { "type": "number" }
+      },
+      "required": ["message", "timestamp"]
     }
   },
   "firestore": {
     "/users/{userId}": {
       "schema": "User",
       "description": "User profile document"
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "User feedback documents"
     }
   }
 }

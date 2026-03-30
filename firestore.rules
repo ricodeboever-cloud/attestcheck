@@ -31,7 +31,7 @@ service cloud.firestore {
 
     // Domain Validators
     function isValidUser(data) {
-      return data.keys().hasOnly(['naam', 'email', 'school', 'jaar', 'leeftijd', 'richting', 'vakken', 'gedragAntw', 'score']) &&
+      return data.keys().hasOnly(['naam', 'email', 'school', 'jaar', 'leeftijd', 'richting', 'vakken', 'gedragAntw', 'nederlandsAntw', 'score']) &&
              data.naam is string && data.naam.size() > 0 && data.naam.size() < 100 &&
              data.email is string && isValidEmail(data.email) &&
              (!('school' in data) || data.school is string) &&
@@ -40,7 +40,18 @@ service cloud.firestore {
              (!('richting' in data) || data.richting is string) &&
              (!('vakken' in data) || data.vakken is list) &&
              (!('gedragAntw' in data) || data.gedragAntw is map) &&
+             (!('nederlandsAntw' in data) || data.nederlandsAntw is map) &&
              (!('score' in data) || data.score is number);
+    }
+
+    function isValidFeedback(data) {
+      return data.keys().hasOnly(['userId', 'userEmail', 'userName', 'message', 'timestamp', 'rating']) &&
+             data.message is string && data.message.size() > 0 && data.message.size() < 5000 &&
+             data.timestamp is timestamp &&
+             (!('userId' in data) || data.userId is string) &&
+             (!('userEmail' in data) || data.userEmail is string) &&
+             (!('userName' in data) || data.userName is string) &&
+             (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5));
     }
 
     match /users/{userId} {
@@ -48,6 +59,11 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data);
       allow delete: if isOwner(userId);
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
+      allow read: if false; // Only admin can read feedback (manual check in console)
     }
   }
 }
