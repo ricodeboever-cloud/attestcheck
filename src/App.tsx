@@ -207,6 +207,9 @@ function AttestatieApp() {
     motivation: string;
   }
 
+  const [userApiKey,    setUserApiKey]   = useState<string>(localStorage.getItem("user_gemini_api_key") || "");
+  const [showSettings,  setShowSettings] = useState(false);
+
   const cleanJSON = (text: string) => {
     let cleaned = text.trim();
     // Zoek naar de eerste { of [ en de laatste } of ]
@@ -237,19 +240,30 @@ function AttestatieApp() {
   };
 
   const getApiKey = () => {
+    if (userApiKey) return userApiKey;
     // @ts-ignore
     return import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || (window as any).API_KEY;
   };
 
+  const saveUserApiKey = (key: string) => {
+    const k = key.trim();
+    setUserApiKey(k);
+    if (k) {
+      localStorage.setItem("user_gemini_api_key", k);
+    } else {
+      localStorage.removeItem("user_gemini_api_key");
+    }
+    checkApiKey();
+  };
+
   const checkApiKey = async () => {
     try {
+      const currentKey = getApiKey();
       if (window.aistudio) {
         const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected || !!getApiKey());
+        setHasApiKey(selected || !!currentKey);
       } else {
-        // Op de gedeelde URL (Shared App URL) is window.aistudio niet beschikbaar.
-        // We vertrouwen hier op de omgevingsvariabelen die via Vite zijn geinjecteerd.
-        setHasApiKey(!!getApiKey());
+        setHasApiKey(!!currentKey);
       }
     } catch (e) {
       console.error("Error checking API key:", e);
@@ -281,8 +295,7 @@ function AttestatieApp() {
         setFbError("Kon het venster niet openen. Probeer de pagina te verversen.");
       }
     } else {
-      console.warn("window.aistudio niet gevonden");
-      setFbError("AI Studio integratie niet gevonden. Gebruik de app binnen AI Studio.");
+      setShowSettings(true);
     }
   };
 
@@ -412,6 +425,8 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
       if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
         msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
         setHasApiKey(false); // Forceer de knop om te verschijnen
+      } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
+        msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
       }
       setFbError(msg);
     }
@@ -622,8 +637,8 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   );
 
   // ── OCR PROMPT ───────────────────────────────────────────
-  const OCR_PROMPT = `Analyseer deze afbeelding van een Belgisch schoolrapport (Smartschool, Skore, PDF, etc.).
-Zoek naar vaknamen en hun bijbehorende scores.
+  const OCR_PROMPT = `Analyseer deze afbeelding(en) van een Belgisch schoolrapport (Smartschool, Skore, PDF, etc.).
+Zoek naar vaknamen en hun bijbehorende scores over alle beelden heen.
 
 STRIKTE REGELS VOOR EXTRACTIE:
 1. VAKNAAM: De naam van het vak (bv. "Wiskunde", "Frans").
@@ -641,7 +656,17 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
   const WelcomeScreen = () => (
-    <div style={{textAlign:"center",paddingTop:60}}>
+    <div style={{textAlign:"center",paddingTop:60, position: "relative"}}>
+      <button 
+        onClick={() => setShowSettings(true)}
+        style={{
+          position: "absolute", top: -40, right: 10, background: "none", border: "none", 
+          fontSize: 24, cursor: "pointer", opacity: 0.6
+        }}
+        title="Instellingen"
+      >
+        ⚙️
+      </button>
       <div style={{fontSize:76,marginBottom:12}}>📊</div>
       <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
       <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
@@ -815,8 +840,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
       const apiKey = getApiKey();
-      console.log("OCR: API Key gevonden?", !!apiKey);
-      
       if (!apiKey) {
         setOcrFout("API key niet gevonden. Stel deze in via AI Studio (Secrets -> VITE_GEMINI_API_KEY).");
         setOcrLoading(false);
@@ -825,71 +848,68 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       const ai = new GoogleGenAI({ apiKey });
 
       try {
-        const results = await Promise.all(files.map(async (file, index) => {
-          // Voeg een kleine vertraging toe tussen bestanden om rate limits te voorkomen
-          if (index > 0) await new Promise(r => setTimeout(r, index * 500));
-          
-          return new Promise<any[]>((resolve, reject) => {
+        // 1. Lees alle bestanden naar base64
+        const imageParts = await Promise.all(files.map(async (file) => {
+          return new Promise<any>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = async (ev) => {
-              try {
-                const b64 = (ev.target?.result as string).split(",")[1];
-                setReportImage(b64); // Sla de laatste afbeelding op
-                
-                console.log(`OCR: Bezig met analyseren van ${file.name}...`);
-                const response = await ai.models.generateContent({
-                  model: "gemini-3-flash-preview",
-                  contents: [
-                    {
-                      parts: [
-                        { inlineData: { mimeType: file.type, data: b64 } },
-                        { text: OCR_PROMPT }
-                      ]
-                    }
-                  ],
-                  config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          naam: { type: Type.STRING },
-                          punt: { type: Type.STRING },
-                          maxPunt: { type: Type.STRING }
-                        },
-                        required: ["naam", "punt", "maxPunt"]
-                      }
-                    }
-                  }
-                });
-
-                const text = response.text;
-                console.log("OCR Raw Response:", text);
-                
-                if (!text) {
-                  throw new Error("De AI gaf geen antwoord terug voor dit bestand.");
-                }
-
-                const extracted = JSON.parse(cleanJSON(text));
-                resolve(extracted);
-              } catch (err: any) {
-                console.error(`OCR Error voor ${file.name}:`, err);
-                reject(err);
-              }
+            reader.onload = (ev) => {
+              const b64 = (ev.target?.result as string).split(",")[1];
+              resolve({ inlineData: { mimeType: file.type, data: b64 } });
             };
-            reader.onerror = () => reject(new Error("Kon bestand niet lezen."));
+            reader.onerror = () => reject(new Error(`Kon ${file.name} niet lezen.`));
             reader.readAsDataURL(file);
           });
         }));
 
-        const allExtracted = results.flat();
-        if (allExtracted.length === 0) {
+        if (imageParts.length > 0) {
+          setReportImage(imageParts[imageParts.length - 1].inlineData.data);
+        }
+
+        console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
+        
+        // 2. Stuur één enkel verzoek met alle beelden
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [
+            {
+              parts: [
+                ...imageParts,
+                { text: OCR_PROMPT }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  naam: { type: Type.STRING },
+                  punt: { type: Type.STRING },
+                  maxPunt: { type: Type.STRING }
+                },
+                required: ["naam", "punt", "maxPunt"]
+              }
+            }
+          }
+        });
+
+        const text = response.text;
+        console.log("OCR Raw Response:", text);
+        
+        if (!text) {
+          throw new Error("De AI gaf geen antwoord terug.");
+        }
+
+        const extracted = JSON.parse(cleanJSON(text));
+        
+        if (extracted.length === 0) {
           setOcrFout("Geen vakken of punten gevonden op deze foto's. Probeer een duidelijkere foto van de tabel.");
           return;
         }
         
-        const merged = allExtracted.reduce((acc: any[], curr: any) => {
+        const merged = extracted.reduce((acc: any[], curr: any) => {
           const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
           if (existingIndex > -1) {
             acc[existingIndex] = curr;
@@ -991,7 +1011,17 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                 }}>📷 Foto van rapport</button>
             }
             {ocrMsg  && <div style={{...S.ok,  margin:"12px 0 0"}}>{ocrMsg}</div>}
-            {ocrFout && <div style={{...S.err, margin:"12px 0 0"}}>{ocrFout}</div>}
+            {ocrFout && (
+              <div style={{marginTop:12}}>
+                <div style={{...S.err, marginBottom:8}}>{ocrFout}</div>
+                <button 
+                  onClick={()=>fileRef.current?.click()} 
+                  style={{...S.btnSec, padding:"6px 12px", fontSize:12, background:"white", width:"auto", height:"auto"}}
+                >
+                  🔄 Opnieuw proberen
+                </button>
+              </div>
+            )}
           </div>
 
           <label style={S.lbl}>🏫 Naam van je school</label>
@@ -1135,63 +1165,68 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       const ai = new GoogleGenAI({ apiKey });
 
       try {
-        const results = await Promise.all(files.map(async (file, index) => {
-          // Voeg een kleine vertraging toe tussen bestanden om rate limits te voorkomen
-          if (index > 0) await new Promise(r => setTimeout(r, index * 500));
-
-          return new Promise<any[]>((resolve, reject) => {
+        // 1. Lees alle bestanden naar base64
+        const imageParts = await Promise.all(files.map(async (file) => {
+          return new Promise<any>((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = async (ev) => {
-              try {
-                const b64 = (ev.target?.result as string).split(",")[1];
-                setReportImage(b64);
-                
-                const response = await ai.models.generateContent({
-                  model: "gemini-3-flash-preview",
-                  contents: [
-                    {
-                      parts: [
-                        { inlineData: { mimeType: file.type, data: b64 } },
-                        { text: OCR_PROMPT }
-                      ]
-                    }
-                  ],
-                  config: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                      type: Type.ARRAY,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          naam: { type: Type.STRING },
-                          punt: { type: Type.STRING },
-                          maxPunt: { type: Type.STRING }
-                        },
-                        required: ["naam", "punt", "maxPunt"]
-                      }
-                    }
-                  }
-                });
-
-                const text = response.text;
-                if (!text) throw new Error("Geen antwoord van AI.");
-                const extracted = JSON.parse(cleanJSON(text));
-                resolve(extracted);
-              } catch (err) {
-                reject(err);
-              }
+            reader.onload = (ev) => {
+              const b64 = (ev.target?.result as string).split(",")[1];
+              resolve({ inlineData: { mimeType: file.type, data: b64 } });
             };
-            reader.onerror = reject;
+            reader.onerror = () => reject(new Error(`Kon ${file.name} niet lezen.`));
             reader.readAsDataURL(file);
           });
         }));
 
-        const allExtracted = results.flat();
-        if (allExtracted.length === 0) {
+        if (imageParts.length > 0) {
+          setReportImage(imageParts[imageParts.length - 1].inlineData.data);
+        }
+
+        console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
+        
+        // 2. Stuur één enkel verzoek met alle beelden
+        const response = await ai.models.generateContent({
+          model: "gemini-3-flash-preview",
+          contents: [
+            {
+              parts: [
+                ...imageParts,
+                { text: OCR_PROMPT }
+              ]
+            }
+          ],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  naam: { type: Type.STRING },
+                  punt: { type: Type.STRING },
+                  maxPunt: { type: Type.STRING }
+                },
+                required: ["naam", "punt", "maxPunt"]
+              }
+            }
+          }
+        });
+
+        const text = response.text;
+        console.log("OCR Raw Response:", text);
+        
+        if (!text) {
+          throw new Error("De AI gaf geen antwoord terug.");
+        }
+
+        const extracted = JSON.parse(cleanJSON(text));
+        
+        if (extracted.length === 0) {
           setOcrFout("Geen vakken of punten gevonden op deze foto's. Probeer een duidelijkere foto van de tabel.");
           return;
         }
-        const merged = allExtracted.reduce((acc: any[], curr: any) => {
+        
+        const merged = extracted.reduce((acc: any[], curr: any) => {
           const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
           if (existingIndex > -1) {
             acc[existingIndex] = curr;
@@ -1288,8 +1323,19 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                 }}>📷 Foto kiezen</button>
             }
             {ocrMsg  && <div style={{...S.ok,  margin:"12px 0 0"}}>{ocrMsg}</div>}
-            {ocrFout && <div style={{...S.err, margin:"12px 0 0"}}>{ocrFout}</div>}
+            {ocrFout && (
+              <div style={{marginTop:12}}>
+                <div style={{...S.err, marginBottom:8}}>{ocrFout}</div>
+                <button 
+                  onClick={()=>fileRef.current?.click()} 
+                  style={{...S.btnSec, padding:"6px 12px", fontSize:12, background:"white", width:"auto", height:"auto"}}
+                >
+                  🔄 Opnieuw proberen
+                </button>
+              </div>
+            )}
           </div>
+
           <div style={{display:"grid",gridTemplateColumns:"1fr 76px 70px",gap:6,marginBottom:8}}>
             <span style={{...S.lbl,margin:0}}>Vak</span>
             <span style={{...S.lbl,margin:0,textAlign:"center"}}>Punt</span>
@@ -1824,11 +1870,55 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       `}</style>
       <Blobs/>
       <FeedbackModal/>
+      
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={{
+          position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.5)", 
+          display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20
+        }}>
+          <div style={{...S.card, maxWidth:400, width:"100%", position:"relative"}}>
+            <button 
+              onClick={() => setShowSettings(false)}
+              style={{position:"absolute", top:15, right:15, background:"none", border:"none", fontSize:20, cursor:"pointer"}}
+            >
+              ✕
+            </button>
+            <h2 style={{...S.h2, fontSize:20, marginBottom:10}}>⚙️ Instellingen</h2>
+            <p style={{...S.sub, fontSize:13, marginBottom:20}}>
+              Beheer je API-sleutel voor de AI-functies.
+            </p>
+
+            <label style={S.lbl}>Gemini API Sleutel (Optioneel)</label>
+            <input 
+              type="password"
+              style={S.input}
+              value={userApiKey}
+              onChange={(e) => saveUserApiKey(e.target.value)}
+              placeholder="Plak je eigen AI-sleutel hier..."
+            />
+            <p style={{fontSize:11, color:"#8B6242", marginTop:-10, marginBottom:20, lineHeight:1.4}}>
+              Als je een eigen sleutel invoert, gebruik je jouw eigen "credits" (quota). 
+              Je kunt een gratis sleutel aanmaken op <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:OR}}>Google AI Studio</a>.
+            </p>
+
+            <button style={S.btn} onClick={() => setShowSettings(false)}>Opslaan & Sluiten</button>
+          </div>
+        </div>
+      )}
+
       <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <div style={{fontWeight:900,color:OR,fontSize:16}}>📊 RapportRadar</div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <button 
+                onClick={() => setShowSettings(true)}
+                style={{
+                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
+                  padding:"5px 10px", fontSize:12, fontWeight:700, color:ORD, cursor:"pointer"
+                }}
+              >⚙️ Instellingen</button>
               <button 
                 onClick={() => setShowFeedback(true)}
                 style={{
