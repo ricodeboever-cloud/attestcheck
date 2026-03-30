@@ -292,7 +292,7 @@ function AttestatieApp() {
 
       const ai = new GoogleGenAI({ apiKey });
 
-      const prompt = `Je bent een deskundige Belgische schoolcoach.
+      const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
 Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
 Eindscore: ${score}% → Attest: ${attest.label}
 
@@ -303,11 +303,17 @@ Context:
 - Vakken: ${vakInfo}
 - Gedrag: ${gedragInfo}
 
+Terminologie-hulp voor het rapport (indien aanwezig):
+- DW / Dagelijks Werk: Punten op toetsen en taken doorheen het jaar.
+- EX / E / Examens: Punten op de examenperiodes.
+- JR / Jaarresultaat: Het eindtotaal voor een vak.
+- Attest A: Geslaagd. Attest B: Geslaagd, maar met uitsluiting van bepaalde richtingen. Attest C: Niet geslaagd.
+
 Geef uitvoerige maar hapklare feedback in JSON formaat.
 1. scoreAnalysis: Waarom is de score ${score}%? Geef 3-4 punten (positief/negatief).
-2. actionPoints: 3 concrete acties om te verbeteren. Prioriteer hoofdvakken.
-3. betterStudentTips: 3 tips om het "nog beter te doen" (focus op attitude en studiehouding).
-4. motivation: Een korte krachtige uitsmijter.`;
+2. actionPoints: 3 concrete acties om te verbeteren. Prioriteer hoofdvakken en vakken met lage scores.
+3. betterStudentTips: 3 tips om het "nog beter te doen" (focus op attitude, studiehouding en planning).
+4. motivation: Een korte krachtige uitsmijter die de student motiveert.`;
 
       const contents: any[] = [{ text: prompt }];
       if (reportImage) {
@@ -511,11 +517,12 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     },
     btnSec: {
       width:"100%", padding:"16px", background:"white", color:OR,
-      border:`2px solid ${ORPL}`, borderRadius:20, fontSize:16, fontWeight:700,
+      border:`2px solid ${OR}`, borderRadius:20, fontSize:16, fontWeight:800,
       fontFamily:"inherit", cursor:"pointer", marginBottom:14, display:"block", textAlign:"center",
       transition: "all .2s",
       userSelect: "none",
       WebkitTapHighlightColor: "transparent",
+      boxShadow: "0 4px 12px rgba(0,0,0,0.05)"
     },
     input: {
       width:"100%", padding:"15px 18px", border:`2px solid ${ORPL}`,
@@ -529,19 +536,19 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     ok:   { background:"#DCFCE7", color:"#15803D", padding:"10px 14px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:12 },
     back: { 
       background:"white", 
-      border:`1px solid ${ORPL}`, 
+      border:`2px solid ${OR}`, 
       fontSize:14, 
       cursor:"pointer", 
       marginBottom:16, 
-      color:ORD, 
+      color:OR, 
       fontFamily:"inherit", 
       fontWeight:800, 
-      padding:"8px 16px",
-      borderRadius:12,
+      padding:"10px 20px",
+      borderRadius:16,
       display:"inline-flex",
       alignItems:"center",
-      gap:6,
-      boxShadow: "0 2px 6px rgba(0,0,0,0.05)"
+      gap:8,
+      boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
     },
   };
 
@@ -594,19 +601,27 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   );
 
   // ── OCR PROMPT ───────────────────────────────────────────
-  const OCR_PROMPT = `Analyseer deze afbeelding van een schoolrapport of puntenlijst (vaak een Smartschool-rooster).
-Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
-De eerste kolom bevat meestal de vaknaam (bv. 'AV Engels', 'TV/PV verkoopmedewerker').
-De volgende kolommen bevatten scores in het formaat 'behaald/maximum' (bv. '7,5/10', '28/38') of als percentage/getal (bv. '73,3', '67').
-De kolomkop voor de scores kan 'DW', 'Dagelijks Werk', 'Punt', 'Resultaat' of 'Totaal' zijn.
+  const OCR_PROMPT = `Analyseer deze afbeelding van een Belgisch schoolrapport (vaak Smartschool, Skore, of een PDF-export).
+Zoek naar een tabel of lijst met vaknamen en bijbehorende scores. 
+
+HERKENNINGSREGELS:
+1. VAKNAMEN: De eerste kolom bevat meestal de vaknaam (bv. 'AV Engels', 'TV/PV verkoopmedewerker', 'Wiskunde').
+2. SCORES: Zoek naar kolommen met koppen zoals:
+   - 'DW', 'Dagelijks Werk', 'DW1', 'DW2', 'DW3', 'DW4'
+   - 'E', 'EX', 'Examens', 'E1', 'E2', 'E3'
+   - 'JR', 'Jaarresultaat', 'Totaal', 'Resultaat', 'S1'
+   - 'Gew. min.' en 'Resultaat' (vaak in basisonderwijs, bv. 7.5 / 10)
 
 BELANGRIJKE INSTRUCTIES:
-1. De scores gebruiken vaak een komma als decimaalteken (bv. '73,3'). Zet deze ALTIJD om naar een punt (bv. '73.3').
-2. Als er meerdere kolommen met scores zijn, neem de MEEST RECHTSE (laatste) ingevulde score in een rij.
-3. EXCLUSIE CRITERIA: Negeer de rij die begint met "TOTAAL", "Algemeen totaal", "Gemiddelde", "Resultaat" of "Eindtotaal". We willen enkel de individuele vakken.
-4. Als een score alleen een getal is (zonder /max), ga er dan vanuit dat het op 100 is (maxPunt: "100").
-5. Geef het resultaat terug als een JSON array van objecten:
-   [{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+- FORMAT: Scores kunnen zijn: '7,5/10', '28/38', '73,3', '67%', '14/20'.
+- DECIMAAL: Gebruik ALTIJD een punt (.) in plaats van een komma (,) voor getallen (bv. '73,3' -> '73.3').
+- MEEST RECENTE: Als er meerdere score-kolommen zijn (bv. DW1, DW2, DW3), neem de MEEST RECHTSE (laatste) ingevulde waarde voor dat vak.
+- MAXIMA: Als een score alleen een getal is (bv. '73.3'), ga er dan vanuit dat het op 100 is (maxPunt: "100"). Als er '/10' of '/20' staat, gebruik dat als maxPunt.
+- EXCLUSIE: Negeer rijen die enkel totalen of gemiddelden bevatten (bv. "TOTAAL", "Algemeen totaal", "Gemiddelde", "Resultaat").
+- COMMENTAAR: Negeer tekstuele commentaren, we willen enkel de numerieke scores.
+
+Geef het resultaat terug als een JSON array van objecten:
+[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
 
 Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
 
