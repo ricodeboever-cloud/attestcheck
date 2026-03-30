@@ -542,6 +542,24 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     </div>
   );
 
+  // ── OCR PROMPT ───────────────────────────────────────────
+  const OCR_PROMPT = `Analyseer deze afbeelding van een schoolrapport of puntenlijst (vaak een Smartschool-rooster).
+Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
+De eerste kolom bevat meestal de vaknaam (bv. 'AV Engels', 'TV/PV verkoopmedewerker').
+De volgende kolommen bevatten scores in het formaat 'behaald/maximum' (bv. '7,5/10', '28/38').
+Soms zijn er meerdere kolommen met scores. De MEEST RECHTSE (laatste) ingevulde score in een rij is de meest recente en dus de belangrijkste.
+Extraheer voor elk vak de naam en deze meest recente score.
+Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
+
+Geef het resultaat terug als een JSON array van objecten:
+[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+
+Belangrijk:
+- Negeer titels, datums of andere tekst die geen vaknaam is.
+- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
+- Als een vak geen punt heeft, laat "punt" leeg ("").
+- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
+
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
   const WelcomeScreen = () => (
     <div style={{textAlign:"center",paddingTop:60}}>
@@ -695,95 +713,97 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     const verwijder = (id: number) => setLv(lv.filter(v=>v.id!==id));
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
+      
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
+        setOcrLoading(false);
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey });
+
       try {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          const b64 = (ev.target?.result as string).split(",")[1];
-          setReportImage(b64); // Sla de afbeelding op voor de coach later
-          const apiKey = getApiKey();
-          if (!apiKey) {
-            setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
-            setOcrLoading(false);
-            return;
-          }
-          const ai = new GoogleGenAI({ apiKey });
-          
-          try {
-            const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: [
-                {
-                  parts: [
-                    { inlineData: { mimeType: file.type, data: b64 } },
+        const results = await Promise.all(files.map(async (file) => {
+          return new Promise<any[]>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+              try {
+                const b64 = (ev.target?.result as string).split(",")[1];
+                setReportImage(b64); // Sla de laatste afbeelding op
+                
+                const response = await ai.models.generateContent({
+                  model: "gemini-3-flash-preview",
+                  contents: [
                     {
-                      text: `Analyseer deze afbeelding van een schoolrapport of puntenlijst. 
-Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
-Voor elk vak:
-1. Extraheer de volledige naam van het vak.
-2. Zoek de meest recente score (vaak de laatste kolom of de meest rechtse ingevulde waarde).
-3. Splits de score in het behaalde punt en het maximum (bv. "14/20" -> punt: 14, max: 20).
-4. Als er geen maximum staat, ga uit van 20 of zoek naar een kolomkop die het maximum aangeeft.
-5. Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
-
-Geef het resultaat terug als een JSON array van objecten:
-[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
-
-Belangrijk:
-- Negeer titels, datums of andere tekst die geen vaknaam is.
-- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
-- Als een vak geen punt heeft, laat "punt" leeg ("").
-- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
+                      parts: [
+                        { inlineData: { mimeType: file.type, data: b64 } },
+                        { text: OCR_PROMPT }
+                      ]
                     }
-                  ]
-                }
-              ],
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      naam: { type: Type.STRING },
-                      punt: { type: Type.STRING },
-                      maxPunt: { type: Type.STRING }
-                    },
-                    required: ["naam", "punt", "maxPunt"]
+                  ],
+                  config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          naam: { type: Type.STRING },
+                          punt: { type: Type.STRING },
+                          maxPunt: { type: Type.STRING }
+                        },
+                        required: ["naam", "punt", "maxPunt"]
+                      }
+                    }
                   }
-                }
-              }
-            });
+                });
 
-            const text = response.text || "[]";
-            const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
-            setLv(prevLv => {
-              const updated = prevLv.map(v => {
-                const match = extracted.find((e: any) =>
-                  e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
-                  v.naam.toLowerCase().includes(e.naam.toLowerCase())
-                );
-                return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
-              });
-              const nieuw = extracted
-                .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-                .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
-              return [...updated, ...nieuw];
-            });
-            setOcrMsg(`✅ ${extracted.length} vakken en punten herkend!`);
-          } catch (error) {
-            console.error("AI Error:", error);
-            setOcrFout("Kon de tabel niet lezen. Probeer een duidelijkere foto.");
+                const text = response.text || "[]";
+                const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
+                resolve(extracted);
+              } catch (err) {
+                reject(err);
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }));
+
+        const allExtracted = results.flat();
+        // Merge by name
+        const merged = allExtracted.reduce((acc: any[], curr: any) => {
+          const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
+          if (existingIndex > -1) {
+            acc[existingIndex] = curr;
+          } else {
+            acc.push(curr);
           }
-          setOcrLoading(false);
-          e.target.value = "";
-        };
-        reader.readAsDataURL(file);
+          return acc;
+        }, []);
+
+        setLv(prevLv => {
+          const updated = prevLv.map(v => {
+            const match = merged.find((e: any) =>
+              e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
+              v.naam.toLowerCase().includes(e.naam.toLowerCase())
+            );
+            return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+          });
+          const nieuw = merged
+            .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
+            .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+          return [...updated, ...nieuw];
+        });
+        setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
       } catch (error) {
-        setOcrLoading(false); 
-        setOcrFout("Fout bij laden van bestand.");
+        console.error("AI Error:", error);
+        setOcrFout("Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.");
+      } finally {
+        setOcrLoading(false);
         e.target.value = "";
       }
     };
@@ -828,7 +848,7 @@ Belangrijk:
             <div style={{fontSize:36,marginBottom:8}}>📸</div>
             <p style={{fontWeight:800,color:ORD,margin:"0 0 6px",fontSize:15}}>Snelstart: Scan je puntenlijst</p>
             <p style={{fontSize:12,color:"#8B6242",margin:"0 0 14px"}}>De AI herkent direct al je vakken en punten!</p>
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleOCR} style={{display:"none"}}/>
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleOCR} style={{display:"none"}}/>
             {ocrLoading
               ? <div style={{color:OR,fontWeight:700}}>🔍 Analyseren...</div>
               : <button onClick={()=>fileRef.current?.click()} style={{
@@ -969,104 +989,96 @@ Belangrijk:
     const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
+      
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
+        setOcrLoading(false);
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey });
+
       try {
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-          const b64 = (ev.target?.result as string).split(",")[1];
-          setReportImage(b64);
-          
-          const apiKey = getApiKey();
-          if (!apiKey) {
-            setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
-            setOcrLoading(false);
-            return;
-          }
-          const ai = new GoogleGenAI({ apiKey });
-          
-          try {
-            const response = await ai.models.generateContent({
-              model: "gemini-3-flash-preview",
-              contents: [
-                {
-                  parts: [
+        const results = await Promise.all(files.map(async (file) => {
+          return new Promise<any[]>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+              try {
+                const b64 = (ev.target?.result as string).split(",")[1];
+                setReportImage(b64);
+                
+                const response = await ai.models.generateContent({
+                  model: "gemini-3-flash-preview",
+                  contents: [
                     {
-                      inlineData: {
-                        mimeType: file.type,
-                        data: b64
-                      }
-                    },
-                    {
-                      text: `Analyseer deze afbeelding van een schoolrapport of puntenlijst. 
-Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
-Voor elk vak:
-1. Extraheer de volledige naam van het vak.
-2. Zoek de meest recente score (vaak de laatste kolom of de meest rechtse ingevulde waarde).
-3. Splits de score in het behaalde punt en het maximum (bv. "14/20" -> punt: 14, max: 20).
-4. Als er geen maximum staat, ga uit van 20 of zoek naar een kolomkop die het maximum aangeeft.
-5. Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
-
-Geef het resultaat terug als een JSON array van objecten:
-[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
-
-Belangrijk:
-- Negeer titels, datums of andere tekst die geen vaknaam is.
-- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
-- Als een vak geen punt heeft, laat "punt" leeg ("").
-- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`
+                      parts: [
+                        { inlineData: { mimeType: file.type, data: b64 } },
+                        { text: OCR_PROMPT }
+                      ]
                     }
-                  ]
-                }
-              ],
-              config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                  type: Type.ARRAY,
-                  items: {
-                    type: Type.OBJECT,
-                    properties: {
-                      naam: { type: Type.STRING },
-                      punt: { type: Type.STRING },
-                      maxPunt: { type: Type.STRING }
-                    },
-                    required: ["naam", "punt", "maxPunt"]
+                  ],
+                  config: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          naam: { type: Type.STRING },
+                          punt: { type: Type.STRING },
+                          maxPunt: { type: Type.STRING }
+                        },
+                        required: ["naam", "punt", "maxPunt"]
+                      }
+                    }
                   }
-                }
-              }
-            });
+                });
 
-            const text = response.text;
-            if (!text) throw new Error("Geen tekst ontvangen.");
-            const extracted = JSON.parse(cleanJSON(text)) as any[];
-            
-            setLv(prevLv => {
-              const updated = prevLv.map(v => {
-                const match = extracted.find((e: any) =>
-                  e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
-                  v.naam.toLowerCase().includes(e.naam.toLowerCase())
-                );
-                return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
-              });
-              const nieuw = extracted
-                .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-                .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
-              return [...updated, ...nieuw];
-            });
-            setOcrMsg(`✅ ${extracted.length} vakken herkend! Controleer en pas aan waar nodig.`);
-          } catch (error) {
-            console.error("AI Error:", error);
-            setOcrFout("Kon de punten niet lezen. Probeer een duidelijkere afbeelding.");
+                const text = response.text || "[]";
+                const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
+                resolve(extracted);
+              } catch (err) {
+                reject(err);
+              }
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        }));
+
+        const allExtracted = results.flat();
+        const merged = allExtracted.reduce((acc: any[], curr: any) => {
+          const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
+          if (existingIndex > -1) {
+            acc[existingIndex] = curr;
+          } else {
+            acc.push(curr);
           }
-          setOcrLoading(false);
-          e.target.value = "";
-        };
-        reader.readAsDataURL(file);
+          return acc;
+        }, []);
+
+        setLv(prevLv => {
+          const updated = prevLv.map(v => {
+            const match = merged.find((e: any) =>
+              e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
+              v.naam.toLowerCase().includes(e.naam.toLowerCase())
+            );
+            return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+          });
+          const nieuw = merged
+            .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
+            .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+          return [...updated, ...nieuw];
+        });
+        setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
       } catch (error) {
-        console.error("File Reader Error:", error);
-        setOcrLoading(false); 
-        setOcrFout("Er ging iets mis. Probeer opnieuw.");
+        console.error("AI Error:", error);
+        setOcrFout("Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.");
+      } finally {
+        setOcrLoading(false);
         e.target.value = "";
       }
     };
@@ -1104,7 +1116,7 @@ Belangrijk:
             <div style={{fontSize:36,marginBottom:8}}>📸</div>
             <p style={{fontWeight:800,color:ORD,margin:"0 0 6px",fontSize:15}}>Upload een screenshot van je punten</p>
             <p style={{fontSize:12,color:"#8B6242",margin:"0 0 14px"}}>De app vult alles automatisch in!</p>
-            <input ref={fileRef} type="file" accept="image/*" onChange={handleOCR} style={{display:"none"}}/>
+            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleOCR} style={{display:"none"}}/>
             {ocrLoading
               ? <div style={{color:OR,fontWeight:700}}>🔍 Punten worden herkend...</div>
               : <button onClick={()=>fileRef.current?.click()} style={{
