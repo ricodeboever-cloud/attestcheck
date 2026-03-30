@@ -207,9 +207,6 @@ function AttestatieApp() {
     motivation: string;
   }
 
-  const [userApiKey,    setUserApiKey]   = useState<string>(localStorage.getItem("user_gemini_api_key") || "");
-  const [showSettings,  setShowSettings] = useState(false);
-
   const cleanJSON = (text: string) => {
     let cleaned = text.trim();
     // Zoek naar de eerste { of [ en de laatste } of ]
@@ -240,20 +237,8 @@ function AttestatieApp() {
   };
 
   const getApiKey = () => {
-    if (userApiKey) return userApiKey;
     // @ts-ignore
     return import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || (window as any).API_KEY;
-  };
-
-  const saveUserApiKey = (key: string) => {
-    const k = key.trim();
-    setUserApiKey(k);
-    if (k) {
-      localStorage.setItem("user_gemini_api_key", k);
-    } else {
-      localStorage.removeItem("user_gemini_api_key");
-    }
-    checkApiKey();
   };
 
   const checkApiKey = async () => {
@@ -268,6 +253,23 @@ function AttestatieApp() {
     } catch (e) {
       console.error("Error checking API key:", e);
       setHasApiKey(!!getApiKey());
+    }
+  };
+
+  /**
+   * Helper om Gemini aan te roepen met automatische retry bij rate limits (429).
+   */
+  const callGeminiWithRetry = async (fn: () => Promise<any>, retries = 3, delay = 2000): Promise<any> => {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const isRateLimit = error?.message?.includes("quota") || error?.message?.includes("429") || error?.status === 429;
+      if (isRateLimit && retries > 0) {
+        console.warn(`Rate limit bereikt. Retry over ${delay}ms... (${retries} pogingen over)`);
+        await new Promise(res => setTimeout(res, delay));
+        return callGeminiWithRetry(fn, retries - 1, delay * 2); // Exponentiële backoff
+      }
+      throw error;
     }
   };
 
@@ -295,7 +297,7 @@ function AttestatieApp() {
         setFbError("Kon het venster niet openen. Probeer de pagina te verversen.");
       }
     } else {
-      setShowSettings(true);
+      setFbError("Geen AI-sleutel gevonden. Neem contact op met de beheerder.");
     }
   };
 
@@ -359,7 +361,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
         });
       }
 
-      const response = await ai.models.generateContent({
+      const response = await callGeminiWithRetry(() => ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: { parts: contents },
         config: {
@@ -410,7 +412,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
             required: ["scoreAnalysis", "actionPoints", "betterStudentTips", "motivation"]
           }
         }
-      });
+      }));
       
       const text = response.text;
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
@@ -656,17 +658,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
   const WelcomeScreen = () => (
-    <div style={{textAlign:"center",paddingTop:60, position: "relative"}}>
-      <button 
-        onClick={() => setShowSettings(true)}
-        style={{
-          position: "absolute", top: -40, right: 10, background: "none", border: "none", 
-          fontSize: 24, cursor: "pointer", opacity: 0.6
-        }}
-        title="Instellingen"
-      >
-        ⚙️
-      </button>
+    <div style={{textAlign:"center",paddingTop:60}}>
       <div style={{fontSize:76,marginBottom:12}}>📊</div>
       <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
       <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
@@ -868,7 +860,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
-        const response = await ai.models.generateContent({
+        const response = await callGeminiWithRetry(() => ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [
             {
@@ -893,7 +885,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               }
             }
           }
-        });
+        }));
 
         const text = response.text;
         console.log("OCR Raw Response:", text);
@@ -1185,7 +1177,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
-        const response = await ai.models.generateContent({
+        const response = await callGeminiWithRetry(() => ai.models.generateContent({
           model: "gemini-3-flash-preview",
           contents: [
             {
@@ -1210,7 +1202,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               }
             }
           }
-        });
+        }));
 
         const text = response.text;
         console.log("OCR Raw Response:", text);
@@ -1870,55 +1862,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       `}</style>
       <Blobs/>
       <FeedbackModal/>
-      
-      {/* Settings Modal */}
-      {showSettings && (
-        <div style={{
-          position:"fixed", top:0, left:0, right:0, bottom:0, background:"rgba(0,0,0,0.5)", 
-          display:"flex", alignItems:"center", justifyContent:"center", zIndex:1000, padding:20
-        }}>
-          <div style={{...S.card, maxWidth:400, width:"100%", position:"relative"}}>
-            <button 
-              onClick={() => setShowSettings(false)}
-              style={{position:"absolute", top:15, right:15, background:"none", border:"none", fontSize:20, cursor:"pointer"}}
-            >
-              ✕
-            </button>
-            <h2 style={{...S.h2, fontSize:20, marginBottom:10}}>⚙️ Instellingen</h2>
-            <p style={{...S.sub, fontSize:13, marginBottom:20}}>
-              Beheer je API-sleutel voor de AI-functies.
-            </p>
-
-            <label style={S.lbl}>Gemini API Sleutel (Optioneel)</label>
-            <input 
-              type="password"
-              style={S.input}
-              value={userApiKey}
-              onChange={(e) => saveUserApiKey(e.target.value)}
-              placeholder="Plak je eigen AI-sleutel hier..."
-            />
-            <p style={{fontSize:11, color:"#8B6242", marginTop:-10, marginBottom:20, lineHeight:1.4}}>
-              Als je een eigen sleutel invoert, gebruik je jouw eigen "credits" (quota). 
-              Je kunt een gratis sleutel aanmaken op <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" style={{color:OR}}>Google AI Studio</a>.
-            </p>
-
-            <button style={S.btn} onClick={() => setShowSettings(false)}>Opslaan & Sluiten</button>
-          </div>
-        </div>
-      )}
 
       <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <div style={{fontWeight:900,color:OR,fontSize:16}}>📊 RapportRadar</div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
-              <button 
-                onClick={() => setShowSettings(true)}
-                style={{
-                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
-                  padding:"5px 10px", fontSize:12, fontWeight:700, color:ORD, cursor:"pointer"
-                }}
-              >⚙️ Instellingen</button>
               <button 
                 onClick={() => setShowFeedback(true)}
                 style={{
