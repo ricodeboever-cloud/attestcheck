@@ -209,6 +209,27 @@ function AttestatieApp() {
 
   const cleanJSON = (text: string) => {
     let cleaned = text.trim();
+    // Zoek naar de eerste { of [ en de laatste } of ]
+    const firstBrace = cleaned.indexOf("{");
+    const firstBracket = cleaned.indexOf("[");
+    const lastBrace = cleaned.lastIndexOf("}");
+    const lastBracket = cleaned.lastIndexOf("]");
+
+    let start = -1;
+    let end = -1;
+
+    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      start = firstBrace;
+      end = lastBrace;
+    } else if (firstBracket !== -1) {
+      start = firstBracket;
+      end = lastBracket;
+    }
+
+    if (start !== -1 && end !== -1 && end > start) {
+      cleaned = cleaned.substring(start, end + 1);
+    }
+
     if (cleaned.startsWith("```")) {
       cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
     }
@@ -601,29 +622,22 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   );
 
   // ── OCR PROMPT ───────────────────────────────────────────
-  const OCR_PROMPT = `Analyseer deze afbeelding van een Belgisch schoolrapport (vaak Smartschool, Skore, of een PDF-export).
-Zoek naar een tabel of lijst met vaknamen en bijbehorende scores. 
+  const OCR_PROMPT = `Analyseer deze afbeelding van een Belgisch schoolrapport (Smartschool, Skore, PDF, etc.).
+Zoek naar vaknamen en hun bijbehorende scores.
 
-HERKENNINGSREGELS:
-1. VAKNAMEN: De eerste kolom bevat meestal de vaknaam (bv. 'AV Engels', 'TV/PV verkoopmedewerker', 'Wiskunde').
-2. SCORES: Zoek naar kolommen met koppen zoals:
-   - 'DW', 'Dagelijks Werk', 'DW1', 'DW2', 'DW3', 'DW4'
-   - 'E', 'EX', 'Examens', 'E1', 'E2', 'E3'
-   - 'JR', 'Jaarresultaat', 'Totaal', 'Resultaat', 'S1'
-   - 'Gew. min.' en 'Resultaat' (vaak in basisonderwijs, bv. 7.5 / 10)
+STRIKTE REGELS VOOR EXTRACTIE:
+1. VAKNAAM: De naam van het vak (bv. "Wiskunde", "Frans").
+2. PUNT: De behaalde score. Gebruik ALTIJD een punt (.) als decimaalteken (bv. "7,5" wordt "7.5").
+3. MAXPUNT: De maximale score voor dat vak (bv. "10", "20", "100").
+4. MEERDERE KOLOMMEN: Als er meerdere kolommen zijn (DW1, DW2, EX, JR), neem dan de MEEST RECHTSE kolom die een waarde bevat voor dat vak. Dit is meestal het meest recente resultaat.
+5. GEEN TOTALEN: Negeer rijen zoals "Totaal", "Gemiddelde", "Eindtotaal".
+6. FORMAAT: Als je "14/20" ziet, zet dan punt="14" en maxPunt="20".
+7. PERCENTAGE: Als je een getal ziet zoals "73,3" zonder maximum, zet dan punt="73.3" en maxPunt="100".
 
-BELANGRIJKE INSTRUCTIES:
-- FORMAT: Scores kunnen zijn: '7,5/10', '28/38', '73,3', '67%', '14/20'.
-- DECIMAAL: Gebruik ALTIJD een punt (.) in plaats van een komma (,) voor getallen (bv. '73,3' -> '73.3').
-- MEEST RECENTE: Als er meerdere score-kolommen zijn (bv. DW1, DW2, DW3), neem de MEEST RECHTSE (laatste) ingevulde waarde voor dat vak.
-- MAXIMA: Als een score alleen een getal is (bv. '73.3'), ga er dan vanuit dat het op 100 is (maxPunt: "100"). Als er '/10' of '/20' staat, gebruik dat als maxPunt.
-- EXCLUSIE: Negeer rijen die enkel totalen of gemiddelden bevatten (bv. "TOTAAL", "Algemeen totaal", "Gemiddelde", "Resultaat").
-- COMMENTAAR: Negeer tekstuele commentaren, we willen enkel de numerieke scores.
-
-Geef het resultaat terug als een JSON array van objecten:
-[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
-
-Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
+OUTPUT FORMAAT:
+Geef ENKEL een JSON array terug van objecten met deze velden: "naam", "punt", "maxPunt".
+Voorbeeld: [{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, enkel de JSON.`;
 
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
   const WelcomeScreen = () => (
@@ -801,15 +815,20 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
       const apiKey = getApiKey();
+      console.log("OCR: API Key gevonden?", !!apiKey);
+      
       if (!apiKey) {
-        setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
+        setOcrFout("API key niet gevonden. Stel deze in via AI Studio (Secrets -> VITE_GEMINI_API_KEY).");
         setOcrLoading(false);
         return;
       }
       const ai = new GoogleGenAI({ apiKey });
 
       try {
-        const results = await Promise.all(files.map(async (file) => {
+        const results = await Promise.all(files.map(async (file, index) => {
+          // Voeg een kleine vertraging toe tussen bestanden om rate limits te voorkomen
+          if (index > 0) await new Promise(r => setTimeout(r, index * 500));
+          
           return new Promise<any[]>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = async (ev) => {
@@ -817,6 +836,7 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
                 const b64 = (ev.target?.result as string).split(",")[1];
                 setReportImage(b64); // Sla de laatste afbeelding op
                 
+                console.log(`OCR: Bezig met analyseren van ${file.name}...`);
                 const response = await ai.models.generateContent({
                   model: "gemini-3-flash-preview",
                   contents: [
@@ -844,20 +864,31 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
                   }
                 });
 
-                const text = response.text || "[]";
-                const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
+                const text = response.text;
+                console.log("OCR Raw Response:", text);
+                
+                if (!text) {
+                  throw new Error("De AI gaf geen antwoord terug voor dit bestand.");
+                }
+
+                const extracted = JSON.parse(cleanJSON(text));
                 resolve(extracted);
-              } catch (err) {
+              } catch (err: any) {
+                console.error(`OCR Error voor ${file.name}:`, err);
                 reject(err);
               }
             };
-            reader.onerror = reject;
+            reader.onerror = () => reject(new Error("Kon bestand niet lezen."));
             reader.readAsDataURL(file);
           });
         }));
 
         const allExtracted = results.flat();
-        // Merge by name
+        if (allExtracted.length === 0) {
+          setOcrFout("Geen vakken of punten gevonden op deze foto's. Probeer een duidelijkere foto van de tabel.");
+          return;
+        }
+        
         const merged = allExtracted.reduce((acc: any[], curr: any) => {
           const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
           if (existingIndex > -1) {
@@ -893,9 +924,17 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
           return [...updated, ...nieuw];
         });
         setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
-      } catch (error) {
-        console.error("AI Error:", error);
-        setOcrFout("Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.");
+      } catch (error: any) {
+        console.error("AI OCR Error (SchoolInfo):", error);
+        let msg = "Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.";
+        if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("401")) {
+          msg = "Fout met de AI-sleutel. Controleer je 'Secrets' in AI Studio (VITE_GEMINI_API_KEY).";
+        } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
+          msg = "De AI is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
+        } else if (error?.message?.includes("Safety")) {
+          msg = "De AI weigerde dit bestand te lezen vanwege veiligheidsinstellingen.";
+        }
+        setOcrFout(msg);
       } finally {
         setOcrLoading(false);
         e.target.value = "";
@@ -1089,14 +1128,17 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
       
       const apiKey = getApiKey();
       if (!apiKey) {
-        setOcrFout("API key niet gevonden. Stel deze in via AI Studio of Netlify.");
+        setOcrFout("API key niet gevonden. Stel deze in via AI Studio (Secrets -> VITE_GEMINI_API_KEY).");
         setOcrLoading(false);
         return;
       }
       const ai = new GoogleGenAI({ apiKey });
 
       try {
-        const results = await Promise.all(files.map(async (file) => {
+        const results = await Promise.all(files.map(async (file, index) => {
+          // Voeg een kleine vertraging toe tussen bestanden om rate limits te voorkomen
+          if (index > 0) await new Promise(r => setTimeout(r, index * 500));
+
           return new Promise<any[]>((resolve, reject) => {
             const reader = new FileReader();
             reader.onload = async (ev) => {
@@ -1131,8 +1173,9 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
                   }
                 });
 
-                const text = response.text || "[]";
-                const extracted = JSON.parse(text.substring(text.indexOf("["), text.lastIndexOf("]") + 1) || "[]");
+                const text = response.text;
+                if (!text) throw new Error("Geen antwoord van AI.");
+                const extracted = JSON.parse(cleanJSON(text));
                 resolve(extracted);
               } catch (err) {
                 reject(err);
@@ -1144,6 +1187,10 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
         }));
 
         const allExtracted = results.flat();
+        if (allExtracted.length === 0) {
+          setOcrFout("Geen vakken of punten gevonden op deze foto's. Probeer een duidelijkere foto van de tabel.");
+          return;
+        }
         const merged = allExtracted.reduce((acc: any[], curr: any) => {
           const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
           if (existingIndex > -1) {
@@ -1179,9 +1226,19 @@ Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
           return [...updated, ...nieuw];
         });
         setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
-      } catch (error) {
-        console.error("AI Error:", error);
-        setOcrFout("Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.");
+      } catch (error: any) {
+        console.error("AI OCR Error (Grades):", error);
+        let msg = "Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.";
+        if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("401")) {
+          msg = "Fout met de AI-sleutel. Controleer je 'Secrets' in AI Studio (VITE_GEMINI_API_KEY).";
+        } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
+          msg = "De AI is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
+        } else if (error?.message?.includes("Safety")) {
+          msg = "De AI weigerde dit bestand te lezen vanwege veiligheidsinstellingen.";
+        } else if (error instanceof SyntaxError) {
+          msg = "De AI gaf een ongeldig antwoord terug. Probeer het nog eens.";
+        }
+        setOcrFout(msg);
       } finally {
         setOcrLoading(false);
         e.target.value = "";
