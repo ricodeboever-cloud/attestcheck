@@ -546,19 +546,18 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
   const OCR_PROMPT = `Analyseer deze afbeelding van een schoolrapport of puntenlijst (vaak een Smartschool-rooster).
 Zoek naar een tabel of lijst met vaknamen en bijbehorende scores.
 De eerste kolom bevat meestal de vaknaam (bv. 'AV Engels', 'TV/PV verkoopmedewerker').
-De volgende kolommen bevatten scores in het formaat 'behaald/maximum' (bv. '7,5/10', '28/38').
-Soms zijn er meerdere kolommen met scores. De MEEST RECHTSE (laatste) ingevulde score in een rij is de meest recente en dus de belangrijkste.
-Extraheer voor elk vak de naam en deze meest recente score.
-Gebruik een punt (.) als decimaalteken voor getallen (bv. 7,5 wordt 7.5).
+De volgende kolommen bevatten scores in het formaat 'behaald/maximum' (bv. '7,5/10', '28/38') of als percentage/getal (bv. '73,3', '67').
+De kolomkop voor de scores kan 'DW', 'Dagelijks Werk', 'Punt', 'Resultaat' of 'Totaal' zijn.
 
-Geef het resultaat terug als een JSON array van objecten:
-[{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
+BELANGRIJKE INSTRUCTIES:
+1. De scores gebruiken vaak een komma als decimaalteken (bv. '73,3'). Zet deze ALTIJD om naar een punt (bv. '73.3').
+2. Als er meerdere kolommen met scores zijn, neem de MEEST RECHTSE (laatste) ingevulde score in een rij.
+3. EXCLUSIE CRITERIA: Negeer de rij die begint met "TOTAAL", "Algemeen totaal", "Gemiddelde", "Resultaat" of "Eindtotaal". We willen enkel de individuele vakken.
+4. Als een score alleen een getal is (zonder /max), ga er dan vanuit dat het op 100 is (maxPunt: "100").
+5. Geef het resultaat terug als een JSON array van objecten:
+   [{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
 
-Belangrijk:
-- Negeer titels, datums of andere tekst die geen vaknaam is.
-- EXCLUSIE CRITERIA: Negeer rijen met "Algemeen totaal", "Totaal", "Gemiddelde", "Resultaat", "Eindtotaal" of gelijkaardige samenvattende rijen. We willen enkel de individuele vakken.
-- Als een vak geen punt heeft, laat "punt" leeg ("").
-- Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
+Geef ENKEL de JSON array terug, geen extra tekst of uitleg.`;
 
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
   const WelcomeScreen = () => (
@@ -791,11 +790,22 @@ Belangrijk:
               e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
               v.naam.toLowerCase().includes(e.naam.toLowerCase())
             );
-            return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+            if (match) {
+              const pStr = match.punt.replace(",", ".");
+              const p = parseFloat(pStr);
+              const m = match.maxPunt || (p > 20 ? "100" : "20");
+              return { ...v, punt: pStr || "", maxPunt: m };
+            }
+            return v;
           });
           const nieuw = merged
             .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-            .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+            .map((e: any) => {
+              const pStr = e.punt.replace(",", ".");
+              const p = parseFloat(pStr);
+              const m = e.maxPunt || (p > 20 ? "100" : "20");
+              return { id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
+            });
           return [...updated, ...nieuw];
         });
         setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
@@ -1066,11 +1076,22 @@ Belangrijk:
               e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
               v.naam.toLowerCase().includes(e.naam.toLowerCase())
             );
-            return match ? { ...v, punt: match.punt || "", maxPunt: match.maxPunt || "20" } : v;
+            if (match) {
+              const pStr = match.punt.replace(",", ".");
+              const p = parseFloat(pStr);
+              const m = match.maxPunt || (p > 20 ? "100" : "20");
+              return { ...v, punt: pStr || "", maxPunt: m };
+            }
+            return v;
           });
           const nieuw = merged
             .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-            .map((e: any) => ({ id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: e.punt || "", maxPunt: e.maxPunt || "20" }));
+            .map((e: any) => {
+              const pStr = e.punt.replace(",", ".");
+              const p = parseFloat(pStr);
+              const m = e.maxPunt || (p > 20 ? "100" : "20");
+              return { id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
+            });
           return [...updated, ...nieuw];
         });
         setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
