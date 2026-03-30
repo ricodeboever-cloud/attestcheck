@@ -216,12 +216,8 @@ function AttestatieApp() {
   };
 
   const getApiKey = () => {
-    try {
-      // @ts-ignore
-      return import.meta.env.VITE_GEMINI_API_KEY || process.env.API_KEY || process.env.GEMINI_API_KEY || (window as any).API_KEY;
-    } catch (e) {
-      return undefined;
-    }
+    // @ts-ignore
+    return import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || (window as any).API_KEY;
   };
 
   const checkApiKey = async () => {
