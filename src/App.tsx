@@ -257,20 +257,52 @@ function AttestatieApp() {
   };
 
   /**
-   * Helper om Gemini aan te roepen met automatische retry bij rate limits (429).
+   * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
    */
-  const callGeminiWithRetry = async (fn: () => Promise<any>, retries = 3, delay = 2000): Promise<any> => {
-    try {
-      return await fn();
-    } catch (error: any) {
-      const isRateLimit = error?.message?.includes("quota") || error?.message?.includes("429") || error?.status === 429;
-      if (isRateLimit && retries > 0) {
-        console.warn(`Rate limit bereikt. Retry over ${delay}ms... (${retries} pogingen over)`);
-        await new Promise(res => setTimeout(res, delay));
-        return callGeminiWithRetry(fn, retries - 1, delay * 2); // Exponentiële backoff
+  const callGeminiWithFallback = async (params: any, retriesPerModel = 2): Promise<any> => {
+    const models = [
+      "gemini-3-flash-preview",       // De standaard (snel & gratis)
+      "gemini-flash-latest",          // Stabiele alias (soms ander quotum)
+      "gemini-3.1-flash-lite-preview", // Fallback 1 (extra lichte quota)
+      "gemini-3.1-pro-preview"        // Fallback 2 (krachtigste model)
+    ];
+
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error("Geen API-sleutel geconfigureerd.");
+    const ai = new GoogleGenAI({ apiKey });
+
+    for (const modelName of models) {
+      let attempts = 0;
+      while (attempts < retriesPerModel) {
+        try {
+          console.log(`AI aanroep met model: ${modelName} (Poging ${attempts + 1})`);
+          const response = await ai.models.generateContent({
+            ...params,
+            model: modelName
+          });
+          return response;
+        } catch (error: any) {
+          const isRateLimit = error?.message?.includes("quota") || error?.message?.includes("429") || error?.status === 429;
+          
+          if (isRateLimit) {
+            if (attempts < retriesPerModel - 1) {
+              // Wacht even en probeer hetzelfde model nog eens
+              console.warn(`Rate limit op ${modelName}. Retry over 2s...`);
+              await new Promise(res => setTimeout(res, 2000));
+              attempts++;
+              continue;
+            } else {
+              // Quota echt op voor dit model, ga naar het volgende model in de lijst
+              console.warn(`Quota voor ${modelName} volledig verbruikt. Schakel over naar fallback...`);
+              break; // Uit de while-loop, naar de volgende modelName
+            }
+          }
+          // Andere fout? Direct stoppen.
+          throw error;
+        }
       }
-      throw error;
     }
+    throw new Error("Alle beschikbare AI-modellen hebben hun limiet bereikt. Probeer het over een minuutje opnieuw.");
   };
 
   const [authError, setAuthError] = useState("");
@@ -361,8 +393,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
         });
       }
 
-      const response = await callGeminiWithRetry(() => ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+      const response = await callGeminiWithFallback({
         contents: { parts: contents },
         config: {
           responseMimeType: "application/json",
@@ -412,7 +443,7 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
             required: ["scoreAnalysis", "actionPoints", "betterStudentTips", "motivation"]
           }
         }
-      }));
+      });
       
       const text = response.text;
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
@@ -831,14 +862,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       if (!files.length) return;
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setOcrFout("API key niet gevonden. Stel deze in via AI Studio (Secrets -> VITE_GEMINI_API_KEY).");
-        setOcrLoading(false);
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
-
       try {
         // 1. Lees alle bestanden naar base64
         const imageParts = await Promise.all(files.map(async (file) => {
@@ -860,8 +883,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
-        const response = await callGeminiWithRetry(() => ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+        const response = await callGeminiWithFallback({
           contents: [
             {
               parts: [
@@ -885,7 +907,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               }
             }
           }
-        }));
+        });
 
         const text = response.text;
         console.log("OCR Raw Response:", text);
@@ -1148,14 +1170,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       if (!files.length) return;
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setOcrFout("API key niet gevonden. Stel deze in via AI Studio (Secrets -> VITE_GEMINI_API_KEY).");
-        setOcrLoading(false);
-        return;
-      }
-      const ai = new GoogleGenAI({ apiKey });
-
       try {
         // 1. Lees alle bestanden naar base64
         const imageParts = await Promise.all(files.map(async (file) => {
@@ -1177,8 +1191,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
-        const response = await callGeminiWithRetry(() => ai.models.generateContent({
-          model: "gemini-3-flash-preview",
+        const response = await callGeminiWithFallback({
           contents: [
             {
               parts: [
@@ -1202,7 +1215,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               }
             }
           }
-        }));
+        });
 
         const text = response.text;
         console.log("OCR Raw Response:", text);
