@@ -18,6 +18,22 @@ import {
 import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
 import Markdown from "react-markdown";
+import { motion, AnimatePresence } from "motion/react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  ResponsiveContainer,
+  ReferenceLine,
+  AreaChart,
+  Area
+} from "recharts";
+import { OrbitControls, Float, Sparkles, Stars, Environment, PerspectiveCamera, MeshDistortMaterial, ContactShadows, PresentationControls, Float as FloatDrei } from "@react-three/drei";
+import * as THREE from "three";
 
 declare global {
   interface Window {
@@ -176,6 +192,7 @@ function AttestatieApp() {
   const [nederlandsAntw, setNederlandsAntw] = useState<any>({});
   const [score,         setScore]        = useState<number | null>(null);
   const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
+  const [selectedAttest, setSelectedAttest] = useState<"A" | "B" | "C" | null>(null);
   const [fbLoad,        setFbLoad]       = useState(false);
   const [fbError,       setFbError]      = useState("");
   const [reportImage,   setReportImage]  = useState<string | null>(null);
@@ -185,30 +202,120 @@ function AttestatieApp() {
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+  const [showSettings,   setShowSettings]  = useState(false);
+  const [progression,    setProgression]   = useState<any[]>([]);
+  const [progressionLoading, setProgressionLoading] = useState(false);
+  const [saveSuccess,    setSaveSuccess]   = useState(false);
+
+  // ── 9. PROGRESSIE LOGICA ──────────────────────────────
+  const fetchProgression = async () => {
+    if (!currentUser) return;
+    setProgressionLoading(true);
+    try {
+      const path = `users/${currentUser.uid}/progression`;
+      const { getDocs, query, orderBy } = await import("firebase/firestore");
+      const q = query(collection(db, path), orderBy("date", "asc"));
+      const snap = await getDocs(q);
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProgression(data);
+    } catch (error) {
+      console.error("Error fetching progression:", error);
+    } finally {
+      setProgressionLoading(false);
+    }
+  };
+
+  const saveTodayScore = async () => {
+    if (!currentUser || score === null) return;
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const path = `users/${currentUser.uid}/progression`;
+      await setDoc(doc(db, path, today), {
+        userId: currentUser.uid,
+        score: score,
+        date: today,
+        timestamp: serverTimestamp()
+      });
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+      fetchProgression();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/progression/${today}`);
+    }
+  };
+
+  const deleteProgressionPoint = async (date: string) => {
+    if (!currentUser) return;
+    if (!window.confirm(`Weet je zeker dat je de meting van ${date} wilt verwijderen?`)) return;
+    try {
+      const { deleteDoc } = await import("firebase/firestore");
+      await deleteDoc(doc(db, `users/${currentUser.uid}/progression`, date));
+      fetchProgression();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/progression/${date}`);
+    }
+  };
+
+  const calculatePrognosis = (data: any[]) => {
+    if (data.length < 2) return null;
+    const last = data[data.length - 1].score;
+    const first = data[0].score;
+    const diff = last - first;
+    
+    // Trend bepalen
+    let trend = "stabiel";
+    if (diff > 5) trend = "stijgend";
+    if (diff < -5) trend = "dalend";
+
+    // Prognose score
+    let prognosisScore = last;
+    if (trend === "stijgend") prognosisScore += 5;
+    if (trend === "dalend") prognosisScore -= 5;
+    if (last > 70 && trend === "stabiel") prognosisScore += 2;
+
+    prognosisScore = Math.min(100, Math.max(0, prognosisScore));
+
+    return { trend, prognosisScore };
+  };
+
+  useEffect(() => {
+    if (currentUser && screen === "progression") {
+      fetchProgression();
+    }
+  }, [currentUser, screen]);
+
+  interface AttestInfo {
+    status: "behaald" | "mogelijk" | "gevaar";
+    title: string;
+    description: string;
+    actionPlan: string[];
+    consequences: string;
+    emoji: string;
+  }
 
   interface FeedbackData {
-    scoreAnalysis: {
-      title: string;
-      impact: "positive" | "negative" | "neutral";
-      description: string;
-      emoji: string;
-    }[];
-    actionPoints: {
-      title: string;
-      description: string;
-      priority: "high" | "medium" | "low";
-      category: "punten" | "gedrag" | "algemeen";
-    }[];
-    betterStudentTips: {
-      title: string;
-      tip: string;
-      emoji: string;
-    }[];
+    predictedAttest: "A" | "B" | "C";
+    attests: {
+      A: AttestInfo;
+      B: AttestInfo;
+      C: AttestInfo;
+    };
     motivation: string;
   }
 
   const cleanJSON = (text: string) => {
     let cleaned = text.trim();
+    
+    // Verwijder markdown code blocks als die eromheen staan
+    if (cleaned.includes("```")) {
+      const match = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      if (match && match[1]) {
+        cleaned = match[1].trim();
+      } else {
+        cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
+      }
+    }
+
     // Zoek naar de eerste { of [ en de laatste } of ]
     const firstBrace = cleaned.indexOf("{");
     const firstBracket = cleaned.indexOf("[");
@@ -218,7 +325,7 @@ function AttestatieApp() {
     let start = -1;
     let end = -1;
 
-    if (firstBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+    if (firstBrace !== -1 && (firstBracket === -1 || (firstBrace < firstBracket && firstBrace !== -1))) {
       start = firstBrace;
       end = lastBrace;
     } else if (firstBracket !== -1) {
@@ -230,15 +337,14 @@ function AttestatieApp() {
       cleaned = cleaned.substring(start, end + 1);
     }
 
-    if (cleaned.startsWith("```")) {
-      cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
-    }
     return cleaned;
   };
 
   const getApiKey = () => {
     // @ts-ignore
-    return import.meta.env.VITE_GEMINI_API_KEY || (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || (window as any).API_KEY;
+    return import.meta.env.VITE_GEMINI_API_KEY || 
+           (typeof process !== 'undefined' && (process.env.GEMINI_API_KEY || process.env.API_KEY)) || 
+           (window as any).API_KEY;
   };
 
   const checkApiKey = async () => {
@@ -259,7 +365,7 @@ function AttestatieApp() {
   /**
    * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
    */
-  const callGeminiWithFallback = async (params: any, retriesPerModel = 2): Promise<any> => {
+  const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
     const models = [
       "gemini-3-flash-preview",       // De standaard (snel & gratis)
       "gemini-flash-latest",          // Stabiele alias (soms ander quotum)
@@ -268,8 +374,17 @@ function AttestatieApp() {
     ];
 
     const apiKey = getApiKey();
-    if (!apiKey) throw new Error("Geen API-sleutel geconfigureerd.");
-    const ai = new GoogleGenAI({ apiKey });
+    if (!apiKey) {
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        setHasApiKey(true);
+        // Geen return hier, we proberen het met de nieuwe sleutel (die in process.env komt)
+      } else {
+        throw new Error("Geen API-sleutel geconfigureerd. Voeg VITE_GEMINI_API_KEY toe.");
+      }
+    }
+    
+    const ai = new GoogleGenAI({ apiKey: getApiKey() || "" });
 
     for (const modelName of models) {
       let attempts = 0;
@@ -278,31 +393,57 @@ function AttestatieApp() {
           console.log(`AI aanroep met model: ${modelName} (Poging ${attempts + 1})`);
           const response = await ai.models.generateContent({
             ...params,
-            model: modelName
+            model: modelName,
+            config: {
+              ...params.config,
+              safetySettings: [
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+              ]
+            }
           });
           return response;
         } catch (error: any) {
-          const isRateLimit = error?.message?.includes("quota") || error?.message?.includes("429") || error?.status === 429;
+          console.warn(`Fout bij model ${modelName}:`, error);
+          const msg = error?.message || "";
+          const status = error?.status;
           
-          if (isRateLimit) {
+          const isRateLimit = msg.includes("quota") || msg.includes("429") || status === 429;
+          const isTransient = msg.includes("fetch") || msg.includes("network") || msg.includes("deadline") || msg.includes("500") || msg.includes("503");
+          const isNotFoundError = msg.includes("Requested entity was not found");
+
+          if (isNotFoundError && window.aistudio) {
+            console.error("API Key error: Requested entity not found. Re-opening key selector...");
+            setHasApiKey(false);
+            await window.aistudio.openSelectKey();
+            setHasApiKey(true);
+            // Probeer het opnieuw met de nieuwe sleutel
+            attempts++;
+            continue;
+          }
+
+          if (isRateLimit || isTransient) {
             if (attempts < retriesPerModel - 1) {
-              // Wacht even en probeer hetzelfde model nog eens
-              console.warn(`Rate limit op ${modelName}. Retry over 2s...`);
-              await new Promise(res => setTimeout(res, 2000));
+              const delay = isRateLimit ? 2500 : 1000;
+              console.warn(`Transient/Rate limit op ${modelName}. Retry over ${delay}ms...`);
+              await new Promise(res => setTimeout(res, delay));
               attempts++;
               continue;
             } else {
-              // Quota echt op voor dit model, ga naar het volgende model in de lijst
-              console.warn(`Quota voor ${modelName} volledig verbruikt. Schakel over naar fallback...`);
-              break; // Uit de while-loop, naar de volgende modelName
+              console.warn(`Model ${modelName} mislukt na ${retriesPerModel} pogingen. Schakel over...`);
+              break; 
             }
           }
-          // Andere fout? Direct stoppen.
+          
+          // Andere fatale fout?
           throw error;
         }
       }
     }
-    throw new Error("Alle beschikbare AI-modellen hebben hun limiet bereikt. Probeer het over een minuutje opnieuw.");
+    throw new Error("Alle beschikbare AI-modellen hebben hun limiet bereikt of geven fouten. Probeer het over een minuutje opnieuw.");
   };
 
   const [authError, setAuthError] = useState("");
@@ -362,7 +503,7 @@ function AttestatieApp() {
 
       const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
 Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
-Eindscore: ${score}% → Attest: ${attest.label}
+Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
 
 Context:
 - Punten tellen voor 88%, gedrag voor 12%.
@@ -371,17 +512,19 @@ Context:
 - Vakken: ${vakInfo}
 - Gedrag: ${gedragInfo}
 
-Terminologie-hulp voor het rapport (indien aanwezig):
-- DW / Dagelijks Werk: Punten op toetsen en taken doorheen het jaar.
-- EX / E / Examens: Punten op de examenperiodes.
-- JR / Jaarresultaat: Het eindtotaal voor een vak.
+Terminologie-hulp:
 - Attest A: Geslaagd. Attest B: Geslaagd, maar met uitsluiting van bepaalde richtingen. Attest C: Niet geslaagd.
 
 Geef uitvoerige maar hapklare feedback in JSON formaat.
-1. scoreAnalysis: Waarom is de score ${score}%? Geef 3-4 punten (positief/negatief).
-2. actionPoints: 3 concrete acties om te verbeteren. Prioriteer hoofdvakken en vakken met lage scores.
-3. betterStudentTips: 3 tips om het "nog beter te doen" (focus op attitude, studiehouding en planning).
-4. motivation: Een korte krachtige uitsmijter die de student motiveert.`;
+Bepaal welk attest (A, B of C) de student momenteel zou krijgen.
+Geef voor ELK van de drie attesten (A, B en C) een analyse:
+1. status: 'behaald' (huidig), 'mogelijk' (verbetering), 'gevaar' (verslechtering).
+2. title: Pakkende titel.
+3. description: Wat betekent dit specifiek voor deze student?
+4. actionPlan: 3-4 concrete stappen om dit te bereiken/behouden.
+5. consequences: Gevolgen van dit attest.
+6. emoji: Passende emoji.
+Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.`;
 
       const contents: any[] = [{ text: prompt }];
       if (reportImage) {
@@ -400,47 +543,52 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
           responseSchema: {
             type: Type.OBJECT,
             properties: {
-              scoreAnalysis: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    impact: { type: Type.STRING, enum: ["positive", "negative", "neutral"] },
-                    description: { type: Type.STRING },
-                    emoji: { type: Type.STRING }
+              predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
+              attests: {
+                type: Type.OBJECT,
+                properties: {
+                  A: {
+                    type: Type.OBJECT,
+                    properties: {
+                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                      title: { type: Type.STRING },
+                      description: { type: Type.STRING },
+                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      consequences: { type: Type.STRING },
+                      emoji: { type: Type.STRING }
+                    },
+                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
                   },
-                  required: ["title", "impact", "description", "emoji"]
-                }
-              },
-              actionPoints: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    priority: { type: Type.STRING, enum: ["high", "medium", "low"] },
-                    category: { type: Type.STRING, enum: ["punten", "gedrag", "algemeen"] }
+                  B: {
+                    type: Type.OBJECT,
+                    properties: {
+                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                      title: { type: Type.STRING },
+                      description: { type: Type.STRING },
+                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      consequences: { type: Type.STRING },
+                      emoji: { type: Type.STRING }
+                    },
+                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
                   },
-                  required: ["title", "description", "priority", "category"]
-                }
-              },
-              betterStudentTips: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    title: { type: Type.STRING },
-                    tip: { type: Type.STRING },
-                    emoji: { type: Type.STRING }
-                  },
-                  required: ["title", "tip", "emoji"]
-                }
+                  C: {
+                    type: Type.OBJECT,
+                    properties: {
+                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                      title: { type: Type.STRING },
+                      description: { type: Type.STRING },
+                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                      consequences: { type: Type.STRING },
+                      emoji: { type: Type.STRING }
+                    },
+                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
+                  }
+                },
+                required: ["A", "B", "C"]
               },
               motivation: { type: Type.STRING }
             },
-            required: ["scoreAnalysis", "actionPoints", "betterStudentTips", "motivation"]
+            required: ["predictedAttest", "attests", "motivation"]
           }
         }
       });
@@ -449,9 +597,10 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
       
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
-      if (!data.scoreAnalysis || !data.actionPoints) throw new Error("Ongeldige data ontvangen.");
+      if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
       
       setFbData(data);
+      setSelectedAttest(data.predictedAttest);
     } catch (error: any) {
       console.error("AI Feedback Error:", error);
       let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
@@ -504,13 +653,21 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
             if (data.gedragAntw) setGedragAntw(data.gedragAntw);
             if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
             if (data.score !== undefined) setScore(data.score);
+            
+            // Skip onboarding if profile is complete
+            if (data.school && data.jaar && data.leeftijd && data.richting) {
+              setScreen("dashboard");
+            } else {
+              setScreen("dashboard"); // Always go to dashboard if logged in, profile can be set in settings
+            }
           } else {
             setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
+            setScreen("dashboard");
           }
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+          setScreen("dashboard");
         }
-        setScreen("school_info");
       } else {
         setCurrentUser(null);
         setScreen("welcome");
@@ -629,8 +786,8 @@ Geef uitvoerige maar hapklare feedback in JSON formaat.
     </div>
   );
 
-  const stappen = ["🏫","⭐","📊","😊","🎯"];
-  const stpIdx: any  = { school_info:0, important_subjects:1, grades:2, behavior:3, results:4 };
+  const stappen = ["📊","⭐","😊","🎯"];
+  const stpIdx: any  = { grades:0, important_subjects:1, behavior:2, results:3 };
   const StapBar = ({ huidig }: { huidig: string }) => {
     const idx = stpIdx[huidig] ?? -1;
     if (idx < 0) return null;
@@ -700,18 +857,70 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     </div>
   );
 
+  // ── 1.5 DASHBOARD (LANDING VOOR INGELOGDE GEBRUIKERS) ────────
+  const DashboardScreen = () => {
+    const startNieuweAnalyse = () => {
+      setVakken([]);
+      setGedragAntw({});
+      setNederlandsAntw({});
+      setScore(null);
+      setFbData(null);
+      setReportImage(null);
+      setScreen("grades");
+    };
+
+    return (
+      <div style={{paddingTop:20}}>
+        <div style={{...S.card, textAlign:"center", padding:30}}>
+          <div style={{fontSize:64, marginBottom:16}}>🚀</div>
+          <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
+          <p style={{...S.sub, fontSize:15, marginBottom:24}}>
+            Klaar om je rapport te checken? Je gegevens staan alvast klaar.
+          </p>
+          
+          <div style={{background:ORBG, borderRadius:16, padding:18, marginBottom:24, textAlign:"left", border:`1px solid ${ORPL}`}}>
+            <p style={{fontWeight:800, color:ORD, marginBottom:10, fontSize:14}}>📝 Jouw Profiel:</p>
+            <div style={{display:"grid", gap:8, fontSize:14, color:"#5D3D1A"}}>
+              <div>🏫 <strong>School:</strong> {school || "Niet ingesteld"}</div>
+              <div>📅 <strong>Jaar:</strong> {jaar || "Niet ingesteld"}</div>
+              <div>🚀 <strong>Richting:</strong> {richting || "Niet ingesteld"}</div>
+            </div>
+          </div>
+
+          <button style={S.btn} onClick={startNieuweAnalyse}>
+            Start Nieuwe Analyse 📊
+          </button>
+
+          <button style={S.btn} onClick={() => setScreen("progression")}>
+            Mijn Progressie 📈
+          </button>
+          
+          <button style={S.btnSec} onClick={()=>setShowSettings(true)}>
+            Profiel Aanpassen ⚙️
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // ── 2. REGISTREREN ─────────────────────────────────────────
   const RegisterScreen = () => {
-    const [naam,    setNaam]    = useState("");
-    const [email,   setEmail]   = useState("");
-    const [ww,      setWw]      = useState("");
-    const [consent, setConsent] = useState(false);
-    const [discl,   setDiscl]   = useState(false);
-    const [fout,    setFout]    = useState("");
-    const [bezig,   setBezig]   = useState(false);
+    const [naam,     setNaam]     = useState("");
+    const [email,    setEmail]    = useState("");
+    const [ww,       setWw]       = useState("");
+    const [regSchool, setRegSchool] = useState("");
+    const [regJaar,   setRegJaar]   = useState("");
+    const [regLeeftijd, setRegLeeftijd] = useState("");
+    const [regRichting, setRegRichting] = useState("");
+    const [consent,  setConsent]  = useState(false);
+    const [discl,    setDiscl]    = useState(false);
+    const [fout,     setFout]     = useState("");
+    const [bezig,    setBezig]    = useState(false);
 
     const registreer = async () => {
-      if (!naam || !email || !ww) { setFout("Vul alle velden in 😊"); return; }
+      if (!naam || !email || !ww || !regSchool || !regJaar || !regLeeftijd || !regRichting) { 
+        setFout("Vul alle velden in 😊"); return; 
+      }
       if (!consent) { setFout("Geef toestemming om gegevens op te slaan"); return; }
       if (!discl)   { setFout("Bevestig dat je begrijpt dat dit een indicatie is"); return; }
       if (ww.length < 6) { setFout("Wachtwoord moet minstens 6 tekens zijn"); return; }
@@ -721,7 +930,14 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         const cred = await createUserWithEmailAndPassword(auth, email, ww);
         const userPath = `users/${cred.user.uid}`;
         try {
-          await setDoc(doc(db, "users", cred.user.uid), { naam, email });
+          await setDoc(doc(db, "users", cred.user.uid), { 
+            naam, 
+            email,
+            school: regSchool,
+            jaar: regJaar,
+            leeftijd: regLeeftijd,
+            richting: regRichting
+          });
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, userPath);
         }
@@ -751,6 +967,24 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           )}
           <label style={S.lbl}>Voornaam</label>
           <input style={S.input} value={naam} onChange={e=>setNaam(e.target.value)} placeholder="Jouw voornaam"/>
+          
+          <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+            <div>
+              <label style={S.lbl}>Leeftijd</label>
+              <input style={S.input} type="number" value={regLeeftijd} onChange={e=>setRegLeeftijd(e.target.value)} placeholder="Bv. 14"/>
+            </div>
+            <div>
+              <label style={S.lbl}>Jaar & Graad</label>
+              <input style={S.input} value={regJaar} onChange={e=>setRegJaar(e.target.value)} placeholder="Bv. 3e jaar, 2e graad"/>
+            </div>
+          </div>
+
+          <label style={S.lbl}>School</label>
+          <input style={S.input} value={regSchool} onChange={e=>setRegSchool(e.target.value)} placeholder="Naam van je school"/>
+
+          <label style={S.lbl}>Studierichting</label>
+          <input style={S.input} value={regRichting} onChange={e=>setRegRichting(e.target.value)} placeholder="Bv. Economie-Wiskunde"/>
+
           <label style={S.lbl}>E-mailadres</label>
           <input style={S.input} type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="naam@voorbeeld.be"/>
           <label style={S.lbl}>Wachtwoord (min. 6 tekens)</label>
@@ -835,268 +1069,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
-  // ── 4. SCHOOLGEGEVENS ──────────────────────────────────────
-  const SchoolInfoScreen = () => {
-    const [ls,  setLs]  = useState(school);
-    const [lj,  setLj]  = useState(jaar);
-    const [ll,  setLl]  = useState(leeftijd);
-    const [lr,  setLr]  = useState(richting);
-    const [lv,  setLv]  = useState(vakken.length ? [...vakken] : []);
-    const [nv,  setNv]  = useState("");
-    const [fout,setFout]= useState("");
-    const [bezig,setBezig] = useState(false);
-    const [ocrMsg,  setOcrMsg]  = useState("");
-    const [ocrFout, setOcrFout] = useState("");
-    const [ocrLoading, setOcrLoading] = useState(false);
-    const fileRef = useRef<HTMLInputElement>(null);
-
-    const voegToe = () => {
-      if (!nv.trim()) return;
-      setLv([...lv,{id:Date.now(),naam:nv.trim(),isHoofdvak:false,punt:"",maxPunt:"20"}]);
-      setNv("");
-    };
-    const verwijder = (id: number) => setLv(lv.filter(v=>v.id!==id));
-
-    const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
-      setOcrLoading(true); setOcrMsg(""); setOcrFout("");
-      
-      try {
-        // 1. Lees alle bestanden naar base64
-        const imageParts = await Promise.all(files.map(async (file) => {
-          return new Promise<any>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const b64 = (ev.target?.result as string).split(",")[1];
-              resolve({ inlineData: { mimeType: file.type, data: b64 } });
-            };
-            reader.onerror = () => reject(new Error(`Kon ${file.name} niet lezen.`));
-            reader.readAsDataURL(file);
-          });
-        }));
-
-        if (imageParts.length > 0) {
-          setReportImage(imageParts[imageParts.length - 1].inlineData.data);
-        }
-
-        console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
-        
-        // 2. Stuur één enkel verzoek met alle beelden
-        const response = await callGeminiWithFallback({
-          contents: [
-            {
-              parts: [
-                ...imageParts,
-                { text: OCR_PROMPT }
-              ]
-            }
-          ],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  naam: { type: Type.STRING },
-                  punt: { type: Type.STRING },
-                  maxPunt: { type: Type.STRING }
-                },
-                required: ["naam", "punt", "maxPunt"]
-              }
-            }
-          }
-        });
-
-        const text = response.text;
-        console.log("OCR Raw Response:", text);
-        
-        if (!text) {
-          throw new Error("De AI gaf geen antwoord terug.");
-        }
-
-        const extracted = JSON.parse(cleanJSON(text));
-        
-        if (extracted.length === 0) {
-          setOcrFout("Geen vakken of punten gevonden op deze foto's. Probeer een duidelijkere foto van de tabel.");
-          return;
-        }
-        
-        const merged = extracted.reduce((acc: any[], curr: any) => {
-          const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
-          if (existingIndex > -1) {
-            acc[existingIndex] = curr;
-          } else {
-            acc.push(curr);
-          }
-          return acc;
-        }, []);
-
-        setLv(prevLv => {
-          const updated = prevLv.map(v => {
-            const match = merged.find((e: any) =>
-              e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
-              v.naam.toLowerCase().includes(e.naam.toLowerCase())
-            );
-            if (match) {
-              const pStr = match.punt.replace(",", ".");
-              const p = parseFloat(pStr);
-              const m = match.maxPunt || (p > 20 ? "100" : "20");
-              return { ...v, punt: pStr || "", maxPunt: m };
-            }
-            return v;
-          });
-          const nieuw = merged
-            .filter((e: any) => !prevLv.some(v => v.naam.toLowerCase().includes(e.naam.toLowerCase()) || e.naam.toLowerCase().includes(v.naam.toLowerCase())))
-            .map((e: any) => {
-              const pStr = e.punt.replace(",", ".");
-              const p = parseFloat(pStr);
-              const m = e.maxPunt || (p > 20 ? "100" : "20");
-              return { id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
-            });
-          return [...updated, ...nieuw];
-        });
-        setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
-      } catch (error: any) {
-        console.error("AI OCR Error (SchoolInfo):", error);
-        let msg = "Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.";
-        if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("401")) {
-          msg = "Fout met de AI-sleutel. Controleer je 'Secrets' in AI Studio (VITE_GEMINI_API_KEY).";
-        } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
-          msg = "De AI is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
-        } else if (error?.message?.includes("Safety")) {
-          msg = "De AI weigerde dit bestand te lezen vanwege veiligheidsinstellingen.";
-        }
-        setOcrFout(msg);
-      } finally {
-        setOcrLoading(false);
-        e.target.value = "";
-      }
-    };
-
-    const verder = async () => {
-      if (!ls||!lj||!ll||!lr) { setFout("Vul alle schoolgegevens in!"); return; }
-      if (!lv.length)    { setFout("Voeg minstens één vak toe!"); return; }
-      
-      setBezig(true);
-      try {
-        if (currentUser?.uid) {
-          await setDoc(doc(db, "users", currentUser.uid), {
-            ...currentUser,
-            school: ls,
-            jaar: lj,
-            leeftijd: ll,
-            richting: lr,
-            vakken: lv
-          });
-        }
-        setSchool(ls); setJaar(lj); setLeeftijd(ll); setRichting(lr); setVakken(lv);
-        setScreen("important_subjects");
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
-      }
-      setBezig(false);
-    };
-
-    return (
-      <div>
-        <StapBar huidig="school_info"/>
-        <div style={S.card}>
-          <div style={{textAlign:"center",marginBottom:18}}>
-            <div style={{fontSize:52}}>🏫</div>
-            <h2 style={S.h2}>Jouw schoolinfo</h2>
-            <p style={S.sub}>Deze gegevens worden opgeslagen in je account.</p>
-          </div>
-          {fout && <div style={S.err}>{fout}</div>}
-
-          <div style={{background:`linear-gradient(135deg,${OR}14,${ORL}08)`,
-            border:`2px dashed ${OR}66`,borderRadius:16,padding:18,marginBottom:20,textAlign:"center"}}>
-            <div style={{fontSize:36,marginBottom:8}}>📸</div>
-            <p style={{fontWeight:800,color:ORD,margin:"0 0 6px",fontSize:15}}>Snelstart: Scan je puntenlijst</p>
-            <p style={{fontSize:12,color:"#8B6242",margin:"0 0 14px"}}>De AI herkent direct al je vakken en punten!</p>
-            <input ref={fileRef} type="file" accept="image/*" multiple onChange={handleOCR} style={{display:"none"}}/>
-            {ocrLoading
-              ? <div style={{color:OR,fontWeight:700}}>🔍 Analyseren...</div>
-              : <button onClick={()=>fileRef.current?.click()} style={{
-                  background:OR,color:"white",border:"none",borderRadius:12,
-                  padding:"10px 22px",fontSize:14,fontWeight:700,cursor:"pointer",
-                  fontFamily:"inherit",boxShadow:`0 4px 14px ${OR}44`,
-                }}>📷 Foto van rapport</button>
-            }
-            {ocrMsg  && <div style={{...S.ok,  margin:"12px 0 0"}}>{ocrMsg}</div>}
-            {ocrFout && (
-              <div style={{marginTop:12}}>
-                <div style={{...S.err, marginBottom:8}}>{ocrFout}</div>
-                <button 
-                  onClick={()=>fileRef.current?.click()} 
-                  style={{...S.btnSec, padding:"6px 12px", fontSize:12, background:"white", width:"auto", height:"auto"}}
-                >
-                  🔄 Opnieuw proberen
-                </button>
-              </div>
-            )}
-          </div>
-
-          <label style={S.lbl}>🏫 Naam van je school</label>
-          <input style={S.input} value={ls} onChange={e=>setLs(e.target.value)} placeholder="Bv. Atheneum De Kust"/>
-          
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <div>
-              <label style={S.lbl}>📅 Jaar / Graad</label>
-              <select style={{...S.input}} value={lj} onChange={e=>setLj(e.target.value)}>
-                <option value="">Kies jaar...</option>
-                {["1ste leerjaar","2de leerjaar","3de leerjaar","4de leerjaar","5de leerjaar","6de leerjaar",
-                  "1ste middelbaar","2de middelbaar","3de middelbaar","4de middelbaar","5de middelbaar","6de middelbaar"].map(j=>(
-                  <option key={j} value={j}>{j}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={S.lbl}>🎂 Leeftijd</label>
-              <input style={S.input} type="number" value={ll} onChange={e=>setLl(e.target.value)} placeholder="Bv. 14" min="5" max="25"/>
-            </div>
-          </div>
-
-          <label style={S.lbl}>🚀 Richting / Afstudeerrichting</label>
-          <input style={S.input} value={lr} onChange={e=>setLr(e.target.value)} placeholder="Bv. Latijn-Wiskunde of Economie"/>
-          <label style={S.lbl}>📚 Mijn vakken</label>
-          <div style={{display:"flex",gap:8,marginBottom:8}}>
-            <input style={{...S.input,margin:0,flex:1}} value={nv}
-              onChange={e=>setNv(e.target.value)}
-              onKeyDown={e=>e.key==="Enter"&&voegToe()}
-              placeholder="Vak naam (bv. Wiskunde)"/>
-            <button onClick={voegToe} style={{
-              background:OR,color:"white",border:"none",borderRadius:12,
-              padding:"0 18px",fontSize:22,cursor:"pointer",fontWeight:900,
-              boxShadow:`0 4px 12px ${OR}44`,
-            }}>+</button>
-          </div>
-          <div style={{marginBottom:16}}>
-            {lv.map(v=>(
-              <div key={v.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
-                background:ORBG,borderRadius:10,padding:"10px 14px",marginBottom:6}}>
-                <span style={{fontWeight:700,color:"#2D1B00",fontSize:14}}>📖 {v.naam} {v.punt && <span style={{color:OR, marginLeft:5}}>({v.punt}/{v.maxPunt})</span>}</span>
-                <button onClick={()=>verwijder(v.id)} style={{
-                  background:"#FEE2E2",color:"#EF4444",border:"none",borderRadius:8,
-                  padding:"4px 10px",cursor:"pointer",fontWeight:700,fontSize:15,
-                }}>✕</button>
-              </div>
-            ))}
-            {!lv.length && (
-              <div style={{textAlign:"center",color:"#8B6242",fontSize:13,padding:"20px 0",fontStyle:"italic"}}>
-                Nog geen vakken toegevoegd...
-              </div>
-            )}
-          </div>
-          <button style={{...S.btn, opacity: bezig ? 0.7 : 1}} onClick={verder} disabled={bezig}>
-            {bezig ? "⏳ Opslaan..." : "Verder → Belangrijke vakken ⭐"}
-          </button>
-        </div>
-      </div>
-    );
-  };
-
   // ── 5. HOOFDVAKKEN ─────────────────────────────────────────
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
@@ -1113,7 +1085,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             vakken: lv
           });
         }
-        setVakken(lv); setScreen("grades");
+        setVakken(lv); setScreen("behavior");
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
       }
@@ -1121,7 +1093,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div>
         <StapBar huidig="important_subjects"/>
-        <button style={S.back} onClick={()=>setScreen("school_info")}>← Terug</button>
+        <button style={S.back} onClick={()=>setScreen("grades")}>← Terug</button>
         <div style={S.card}>
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:52}}>⭐</div>
@@ -1159,11 +1131,19 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   // ── 6. PUNTEN INVOEREN ─────────────────────────────────────
   const GradesScreen = () => {
     const [lv,      setLv]      = useState([...vakken]);
+    const [nv,      setNv]      = useState("");
     const [ocrMsg,  setOcrMsg]  = useState("");
     const [ocrFout, setOcrFout] = useState("");
     const [ocrLoading, setOcrLoading] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
     const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
+
+    const voegToe = () => {
+      if (!nv.trim()) return;
+      setLv([...lv, { id: Date.now(), naam: nv.trim(), isHoofdvak: false, punt: "", maxPunt: "20" }]);
+      setNv("");
+    };
+    const verwijder = (id: number) => setLv(lv.filter(v => v.id !== id));
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files || []);
@@ -1297,7 +1277,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             vakken: lv
           });
         }
-        setVakken(lv); setScreen("behavior");
+        setVakken(lv); setScreen("important_subjects");
       } catch (error) {
         handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
       }
@@ -1306,7 +1286,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div>
         <StapBar huidig="grades"/>
-        <button style={S.back} onClick={()=>setScreen("important_subjects")}>← Terug</button>
+        <button style={S.back} onClick={()=>setScreen("dashboard")}>← Terug</button>
         <div style={S.card}>
           <div style={{textAlign:"center",marginBottom:18}}>
             <div style={{fontSize:52}}>📊</div>
@@ -1341,24 +1321,41 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             )}
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"1fr 76px 70px",gap:6,marginBottom:8}}>
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <input style={{...S.input,margin:0,flex:1}} value={nv}
+              onChange={e=>setNv(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&voegToe()}
+              placeholder="Vak toevoegen (bv. Frans)"/>
+            <button onClick={voegToe} style={{
+              background:OR,color:"white",border:"none",borderRadius:12,
+              padding:"0 18px",fontSize:22,cursor:"pointer",fontWeight:900,
+              boxShadow:`0 4px 12px ${OR}44`,
+            }}>+</button>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 60px 60px 40px",gap:6,marginBottom:8}}>
             <span style={{...S.lbl,margin:0}}>Vak</span>
             <span style={{...S.lbl,margin:0,textAlign:"center"}}>Punt</span>
             <span style={{...S.lbl,margin:0,textAlign:"center"}}>Max</span>
+            <span></span>
           </div>
           {lv.map(v=>(
-            <div key={v.id} style={{display:"grid",gridTemplateColumns:"1fr 76px 70px",gap:6,marginBottom:6,alignItems:"center"}}>
-              <div style={{background:v.isHoofdvak?`${OR}1F`:ORBG,borderRadius:10,padding:"10px 12px",fontWeight:700,fontSize:13,color:"#2D1B00",display:"flex",alignItems:"center",gap:5}}>
+            <div key={v.id} style={{display:"grid",gridTemplateColumns:"1fr 60px 60px 40px",gap:6,marginBottom:6,alignItems:"center"}}>
+              <div style={{background:v.isHoofdvak?`${OR}1F`:ORBG,borderRadius:10,padding:"10px 12px",fontWeight:700,fontSize:13,color:"#2D1B00",display:"flex",alignItems:"center",gap:5, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>
                 {v.isHoofdvak&&<span>⭐</span>}{v.naam}
               </div>
-              <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 6px",fontSize:16}}
+              <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 4px",fontSize:16}}
                 type="number" value={v.punt} onChange={e=>updateVak(v.id,"punt",e.target.value)} placeholder="0" min="0"/>
-              <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 6px",fontSize:13,color:"#8B6242"}}
+              <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 4px",fontSize:13,color:"#8B6242"}}
                 type="number" value={v.maxPunt} onChange={e=>updateVak(v.id,"maxPunt",e.target.value)} placeholder="20" min="1"/>
+              <button onClick={()=>verwijder(v.id)} style={{
+                background:"#FEE2E2",color:"#EF4444",border:"none",borderRadius:8,
+                height:"100%",cursor:"pointer",fontWeight:700,fontSize:14,
+              }}>✕</button>
             </div>
           ))}
           <div style={{fontSize:11,color:"#8B6242",margin:"8px 0 20px",fontStyle:"italic"}}>⭐ = Hoofdvak (telt {CONFIG.hoofdvakMultiplier}× zwaarder mee)</div>
-          <button style={S.btn} onClick={verder}>Verder → Gedragsvragen 😊</button>
+          <button style={S.btn} onClick={verder}>Verder → Belangrijke vakken ⭐</button>
         </div>
       </div>
     );
@@ -1473,6 +1470,13 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const ResultsScreen = () => {
     const [anim, setAnim] = useState(0);
     const attest = getAttest(score||0);
+
+    useEffect(() => {
+      if (!fbData && !fbLoad && score !== null) {
+        vraagFeedback();
+      }
+    }, [score, fbData, fbLoad]);
+
     useEffect(()=>{
       let raf: number;
       const start=Date.now(),dur=2200,target=score||0;
@@ -1487,52 +1491,192 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     }, [score]);
 
     const Speedo = ({val}: { val: number }) => {
-      const cx=160,cy=132,R=108;
-      const rad=(d: number)=>d*Math.PI/180;
-      const pt=(d: number,r: number)=>({x:cx+r*Math.cos(rad(d)),y:cy+r*Math.sin(rad(d))});
-      const arc=(a1: number,a2: number,ri: number,ro: number)=>{
-        const s1=pt(a1,ro),e1=pt(a2,ro),s2=pt(a1,ri),e2=pt(a2,ri);
-        const lg=Math.abs(a2-a1)>180?1:0;
-        return `M${s1.x} ${s1.y} A${ro} ${ro} 0 ${lg} 1 ${e1.x} ${e1.y} L${e2.x} ${e2.y} A${ri} ${ri} 0 ${lg} 0 ${s2.x} ${s2.y}Z`;
-      };
-      const SA=150,SW=240;
-      const segs: [number, number, string][] = [
-        [SA, SA + SW * (1/3), "#EF4444"], // C: Visueel 1/3
-        [SA + SW * (1/3), SA + SW * (2/3), "#F59E0B"], // B: Visueel 1/3
-        [SA + SW * (2/3), SA + SW, "#22C55E"] // A: Visueel 1/3
-      ];
-
-      // Non-lineaire mapping van score naar visuele positie op de meter
-      let visualPercent = 0;
-      if (val <= CONFIG.attestB_drempel) {
-        visualPercent = (val / CONFIG.attestB_drempel) * 33.33;
-      } else if (val <= CONFIG.attestA_drempel) {
-        visualPercent = 33.33 + ((val - CONFIG.attestB_drempel) / (CONFIG.attestA_drempel - CONFIG.attestB_drempel)) * 33.33;
-      } else {
-        visualPercent = 66.66 + ((val - CONFIG.attestA_drempel) / (100 - CONFIG.attestA_drempel)) * 33.34;
-      }
-
-      const na=SA+(visualPercent/100)*SW, ne=pt(na,R-18);
+      const color = val >= 70 ? "#22C55E" : val >= 50 ? "#F59E0B" : "#EF4444";
+      const isGod = val >= 96;
+      
       return (
-        <svg width="100%" height="auto" viewBox="0 0 320 200" style={{display:"block",margin:"0 auto",maxWidth:320}}>
-          {segs.map(([a1,a2,c],i)=><path key={i} d={arc(a1,a2,78,113)} fill={c} opacity=".88"/>)}
-          <circle cx={cx} cy={cy} r="76" fill="white"/>
-          <circle cx={cx} cy={cy} r="74" fill={ORBG}/>
-          {[0,25,50,75,100].map(v=>{const a=SA+(v/100)*SW;const p1=pt(a,78),p2=pt(a,96);return <line key={v} x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke="white" strokeWidth="2"/>;
-          })}
-          {[
-            {p: 1/6, l:"C", c:"#EF4444"}, 
-            {p: 1/2, l:"B", c:"#F59E0B"}, 
-            {p: 5/6, l:"A", c:"#22C55E"}
-          ].map(({p,l,c})=>{
-            const pos=pt(SA+p*SW,R+22);return <text key={l} x={pos.x} y={pos.y} textAnchor="middle" dominantBaseline="middle" fill={c} fontSize="15" fontWeight="900" fontFamily="Nunito,sans-serif">{l}</text>;
-          })}
-          <text x={cx} y={cy-10} textAnchor="middle" fontSize="38" fontWeight="900" fill="#2D1B00" fontFamily="Nunito,sans-serif">{val}%</text>
-          <text x={cx} y={cy+22} textAnchor="middle" fontSize="15" fontWeight="800" fill={attest.kleur} fontFamily="Nunito,sans-serif">{attest.label}</text>
-          <line x1={cx} y1={cy} x2={ne.x} y2={ne.y} stroke="#2D1B00" strokeWidth="3.5" strokeLinecap="round"/>
-          <circle cx={cx} cy={cy} r="9" fill="#2D1B00"/>
-          <circle cx={cx} cy={cy} r="4" fill="white"/>
-        </svg>
+        <div style={{ marginBottom: 24, padding: "0 10px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 900, color: isGod ? "#F59E0B" : "#8B6242", textTransform: "uppercase", marginBottom: 6, letterSpacing: 1 }}>
+            <span>C-Attest</span>
+            <span>B-Attest</span>
+            <span>A-Attest</span>
+          </div>
+          <div style={{ 
+            height: 12, 
+            background: "#E2E8F0", 
+            borderRadius: 100, 
+            overflow: "hidden", 
+            position: "relative",
+            boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
+            border: isGod ? "2px solid #FFD700" : "none"
+          }}>
+            <div style={{ position: "absolute", left: "33.3%", top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.5)", zIndex: 1 }} />
+            <div style={{ position: "absolute", left: "66.6%", top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.5)", zIndex: 1 }} />
+            <motion.div 
+              initial={{ width: 0 }}
+              animate={{ width: `${val}%` }}
+              transition={{ type: "spring", stiffness: 50, damping: 15 }}
+              style={{ 
+                height: "100%", 
+                background: isGod 
+                  ? "linear-gradient(90deg, #F59E0B, #FFD700, #F59E0B)" 
+                  : `linear-gradient(90deg, ${color}CC, ${color})`,
+                borderRadius: 100,
+                boxShadow: isGod ? "0 0 15px #FFD700" : `0 0 10px ${color}66`
+              }} 
+            />
+          </div>
+          <div style={{ textAlign: "center", marginTop: 8, fontSize: 12, fontWeight: 900, color: isGod ? "#F59E0B" : color, textTransform: "uppercase", letterSpacing: 1 }}>
+            Progressie: {val}% - {getAttest(val).label}
+          </div>
+        </div>
+      );
+    };
+
+    const CharacterAnimation = ({ val }: { val: number }) => {
+      const getMascotState = (p: number) => {
+        if (p < 10) return { label: "Totaal verslagen...", color: "#4B5563", mood: "angry", body: "#4B5563", belly: "#374151", god: false };
+        if (p < 30) return { label: "Zwaar gewond!", color: "#EF4444", mood: "angry", body: "#EF4444", belly: "#FEE2E2", god: false };
+        if (p < 50) return { label: "De weg is lang...", color: "#F59E0B", mood: "sad", body: "#F59E0B", belly: "#FEF3C7", god: false };
+        if (p < 70) return { label: "Klaar voor de strijd", color: "#10B981", mood: "neutral", body: "#10B981", belly: "#D1FAE5", god: false };
+        if (p < 85) return { label: "Echte heldenkracht!", color: "#3B82F6", mood: "happy", body: "#3B82F6", belly: "#DBEAFE", god: false };
+        if (p < 96) return { label: "Legendarische status", color: "#8B5CF6", mood: "happy", body: "#8B5CF6", belly: "#EDE9FE", god: false };
+        return { label: "GOD MODUS BEREIKT", color: "#F59E0B", mood: "god", body: "#FFD700", belly: "#FFF7ED", god: true };
+      };
+
+      const state = getMascotState(val);
+
+      // High-quality Radar Gauge Component (Clean version)
+      const RadarGauge = () => {
+        const radius = 80;
+        const circumference = 2 * Math.PI * radius;
+        const offset = circumference - (val / 100) * circumference;
+
+        return (
+          <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+            <svg viewBox="0 0 200 200" className="w-full h-full max-w-[280px] relative z-10">
+              <defs>
+                <linearGradient id="gaugeGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor={state.color} stopOpacity="0.2" />
+                  <stop offset="100%" stopColor={state.color} />
+                </linearGradient>
+                <filter id="glow">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feComposite in="SourceGraphic" in2="blur" operator="over" />
+                </filter>
+              </defs>
+
+              {/* Background Circle */}
+              <circle
+                cx="100"
+                cy="100"
+                r={radius}
+                fill="none"
+                stroke="rgba(0,0,0,0.05)"
+                strokeWidth="12"
+              />
+
+              {/* Progress Arc */}
+              <motion.circle
+                cx="100"
+                cy="100"
+                r={radius}
+                fill="none"
+                stroke="url(#gaugeGrad)"
+                strokeWidth="12"
+                strokeDasharray={circumference}
+                initial={{ strokeDashoffset: circumference }}
+                animate={{ strokeDashoffset: offset }}
+                transition={{ type: "spring", stiffness: 50, damping: 15 }}
+                strokeLinecap="round"
+                transform="rotate(-90 100 100)"
+                filter="url(#glow)"
+              />
+
+              {/* Center Display */}
+              <motion.g
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ delay: 0.5 }}
+              >
+                <motion.circle 
+                  cx="100" 
+                  cy="100" 
+                  r="50" 
+                  fill="white" 
+                  animate={{ scale: [1, 1.05, 1] }}
+                  transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                />
+                <text
+                  x="100"
+                  y="95"
+                  textAnchor="middle"
+                  className="font-black"
+                  style={{ fontSize: 28, fill: state.color }}
+                >
+                  {val}%
+                </text>
+                <text
+                  x="100"
+                  y="115"
+                  textAnchor="middle"
+                  className="font-bold uppercase tracking-widest"
+                  style={{ fontSize: 8, fill: "#64748B" }}
+                >
+                  Score
+                </text>
+              </motion.g>
+            </svg>
+          </div>
+        );
+      };
+
+      return (
+        <div style={{ 
+          height: 380, 
+          width: "100%",
+          background: "radial-gradient(circle at center, #F8FAFC 0%, #E2E8F0 100%)",
+          borderRadius: 32,
+          marginBottom: 24,
+          position: "relative",
+          overflow: "hidden",
+          border: "1px solid #CBD5E1",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center"
+        }}>
+          <div style={{ width: "100%", height: "100%", position: "relative", zIndex: 1 }}>
+            <RadarGauge />
+          </div>
+
+          <div style={{ 
+            position: "absolute", 
+            bottom: 24, 
+            left: 0, 
+            right: 0, 
+            textAlign: "center",
+            pointerEvents: "none"
+          }}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={state.label}
+                initial={{ y: 20, opacity: 0, scale: 0.8 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                exit={{ y: -20, opacity: 0, scale: 0.8 }}
+                transition={{ type: "spring", stiffness: 300, damping: 20 }}
+                style={{ 
+                  fontSize: 24, 
+                  fontWeight: 900, 
+                  color: state.color, 
+                  textTransform: "uppercase",
+                  letterSpacing: 4,
+                }}
+              >
+                {state.label}
+              </motion.div>
+            </AnimatePresence>
+          </div>
+        </div>
       );
     };
 
@@ -1541,124 +1685,166 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         <StapBar huidig="results"/>
         <div style={S.card}>
           <div style={{textAlign:"center",marginBottom:16}}>
-            <div style={{fontSize:54}}>{attest.emoji}</div>
-            <h2 style={S.h2}>Jouw resultaat</h2>
-          </div>
-          <Speedo val={anim}/>
-          <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
-            borderRadius:16,padding:"16px 20px",marginTop:16,marginBottom:16}}>
-            <div style={{fontSize:26,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
-            <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
+            <h2 style={S.h2}>Jouw Resultaat</h2>
           </div>
           
-          <div style={{marginBottom:20}}>
-            <button style={{...S.btn, background:OR, boxShadow:`0 6px 20px ${OR}66`, height:60, fontSize:18}} onClick={vraagFeedback} disabled={fbLoad}>
-              {fbLoad ? "⏳ De coach analyseert jouw rapport..." : fbData ? "🔄 Nieuwe analyse vragen" : "✨ Hoe kan ik het nog beter doen?"}
-            </button>
-            {fbError && (
-              <div style={{marginTop:12, textAlign:"center"}}>
-                <div style={{...S.err, marginBottom:8}}>{fbError}</div>
-                <div style={{display:"flex", gap:8, justifyContent:"center"}}>
-                  {!hasApiKey && (
-                    <button 
-                      style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
-                      onClick={handleSelectKey}
-                    >
-                      🔑 Sleutel Instellen
-                    </button>
-                  )}
+          <Speedo val={anim}/>
+          <CharacterAnimation val={anim}/>
+
+          {!fbData && (
+            <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
+              borderRadius:16,padding:"16px 20px",marginBottom:16}}>
+              <div style={{fontSize:22,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
+              <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
+            </div>
+          )}
+          
+          {fbLoad && !fbData && (
+            <div style={{textAlign:"center", padding:20, background:ORBG, borderRadius:16, marginBottom:20}}>
+              <div style={{fontSize:30, marginBottom:10, animation:"spin 2s linear infinite"}}>⏳</div>
+              <p style={{fontWeight:800, color:OR, margin:0}}>De coach analyseert jouw rapport...</p>
+            </div>
+          )}
+
+          {fbError && (
+            <div style={{marginBottom:20, textAlign:"center"}}>
+              <div style={{...S.err, marginBottom:8}}>{fbError}</div>
+              <div style={{display:"flex", gap:8, justifyContent:"center"}}>
+                {!hasApiKey && (
                   <button 
                     style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
-                    onClick={vraagFeedback}
+                    onClick={handleSelectKey}
                   >
-                    🔄 Opnieuw Proberen
+                    🔑 Sleutel Instellen
                   </button>
-                </div>
+                )}
+                <button 
+                  style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
+                  onClick={vraagFeedback}
+                >
+                  🔄 Opnieuw Proberen
+                </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {fbData && (
-            <div style={{display:"flex",flexDirection:"column",gap:24,marginBottom:24,textAlign:"left"}}>
-              {/* Score Analyse Grid */}
-              <div>
-                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>📊</span> Waarom deze score?
-                </h3>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit, minmax(160px, 1fr))",gap:12}}>
-                  {fbData.scoreAnalysis.map((item, i) => (
-                    <div key={i} style={{
-                      background: item.impact === "positive" ? "#F0FDF4" : item.impact === "negative" ? "#FEF2F2" : "#F9FAFB",
-                      border: `1px solid ${item.impact === "positive" ? "#DCFCE7" : item.impact === "negative" ? "#FEE2E2" : "#F3F4F6"}`,
-                      borderRadius:14,padding:12,fontSize:12
-                    }}>
-                      <div style={{fontSize:20,marginBottom:6}}>{item.emoji}</div>
-                      <div style={{fontWeight:800,color:"#2D1B00",marginBottom:4}}>{item.title}</div>
-                      <div style={{color:"#4B5563",lineHeight:1.4}}>{item.description}</div>
-                    </div>
-                  ))}
-                </div>
+            <div style={{display:"flex",flexDirection:"column",gap:20,marginBottom:24,textAlign:"left"}}>
+              {/* Samenvatting Quote */}
+              <div style={{textAlign:"center", padding:"16px 20px", background:`${OR}0D`, borderRadius:16, border:`1px dashed ${OR}44`}}>
+                <div style={{fontSize:10, fontWeight:900, color:OR, textTransform:"uppercase", letterSpacing:1, marginBottom:6}}>De Coach in 1 zin:</div>
+                <p style={{fontSize:18, fontWeight:900, color:OR, fontStyle:"italic", margin:0, lineHeight:1.3}}>"{fbData.motivation}"</p>
               </div>
 
-              {/* Actiepunten */}
-              <div>
-                <h3 style={{fontWeight:900,color:"#2D1B00",fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>🎯</span> Jouw Actieplan
-                </h3>
-                <div style={{display:"flex",flexDirection:"column",gap:10}}>
-                  {fbData.actionPoints.map((point, i) => (
-                    <div key={i} style={{
-                      background:"white",border:`1px solid ${point.priority === "high" ? OR : "#E5E7EB"}`,
-                      borderRadius:14,padding:14,display:"flex",gap:12,alignItems:"flex-start",
-                      boxShadow: point.priority === "high" ? `0 4px 12px ${OR}1A` : "none"
-                    }}>
+              {/* Attest Knoppen */}
+              <div style={{display:"flex", gap:8, background:ORBG, padding:6, borderRadius:16}}>
+                {(["A", "B", "C"] as const).map((at) => {
+                  const isActive = selectedAttest === at;
+                  const isPredicted = fbData.predictedAttest === at;
+                  const info = fbData.attests[at];
+                  
+                  return (
+                    <button
+                      key={at}
+                      onClick={() => setSelectedAttest(at)}
+                      style={{
+                        flex: 1,
+                        padding: "12px 8px",
+                        borderRadius: 12,
+                        border: "none",
+                        cursor: "pointer",
+                        background: isActive ? OR : "transparent",
+                        color: isActive ? "white" : "#8B6242",
+                        transition: "all .2s",
+                        position: "relative",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: 4
+                      }}
+                    >
+                      <span style={{fontSize:18, fontWeight:900}}>{at}</span>
+                      <span style={{fontSize:9, fontWeight:800, textTransform:"uppercase", opacity:0.8}}>Attest</span>
+                      {isPredicted && (
+                        <div style={{
+                          position:"absolute", top:-4, right:-4, background:"#22C55E", color:"white",
+                          fontSize:8, padding:"2px 5px", borderRadius:10, fontWeight:900, border:"2px solid white"
+                        }}>HUIDIG</div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Attest Content */}
+              {selectedAttest && (
+                <div style={{
+                  background: "white", border: `2px solid ${selectedAttest === fbData.predictedAttest ? "#22C55E" : ORPL}`,
+                  borderRadius: 20, padding: 20, animation: "bounce .3s ease"
+                }}>
+                  <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:16}}>
+                    <div style={{fontSize:32}}>{fbData.attests[selectedAttest].emoji}</div>
+                    <div>
+                      <h3 style={{fontWeight:900, color:"#2D1B00", fontSize:18, margin:0}}>
+                        {fbData.attests[selectedAttest].title}
+                      </h3>
                       <div style={{
-                        background: point.priority === "high" ? OR : "#F3F4F6",
-                        color: point.priority === "high" ? "white" : "#4B5563",
-                        width:24,height:24,borderRadius:12,display:"flex",alignItems:"center",justifyContent:"center",
-                        fontSize:12,fontWeight:900,flexShrink:0
-                      }}>{i+1}</div>
-                      <div>
-                        <div style={{fontWeight:800,color:"#2D1B00",fontSize:14,marginBottom:2}}>{point.title}</div>
-                        <div style={{fontSize:12,color:"#4B5563",lineHeight:1.5}}>{point.description}</div>
-                        {point.priority === "high" && <span style={{fontSize:10,background:`${OR}1A`,color:OR,padding:"2px 8px",borderRadius:10,fontWeight:800,marginTop:6,display:"inline-block"}}>Hoge Prioriteit ⚡</span>}
+                        fontSize:10, fontWeight:800, color: selectedAttest === fbData.predictedAttest ? "#22C55E" : OR,
+                        textTransform:"uppercase", letterSpacing:0.5
+                      }}>
+                        Status: {fbData.attests[selectedAttest].status}
                       </div>
                     </div>
-                  ))}
-                </div>
-              </div>
+                  </div>
 
-              {/* Nog beter doen Tips */}
-              <div style={{background:"#2D1B00",borderRadius:20,padding:20,color:"white"}}>
-                <h3 style={{fontWeight:900,color:OR,fontSize:16,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
-                  <span>✨</span> Het nog beter doen
-                </h3>
-                <div style={{display:"flex",flexDirection:"column",gap:12}}>
-                  {fbData.betterStudentTips.map((tip, i) => (
-                    <div key={i} style={{display:"flex",gap:12,alignItems:"center"}}>
-                      <div style={{fontSize:24}}>{tip.emoji}</div>
-                      <div>
-                        <div style={{fontWeight:800,fontSize:13,color:OR}}>{tip.title}</div>
-                        <div style={{fontSize:11,color:"#D1D5DB",lineHeight:1.4}}>{tip.tip}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
+                  <p style={{fontSize:14, color:"#4B5563", lineHeight:1.6, marginBottom:20}}>
+                    {fbData.attests[selectedAttest].description}
+                  </p>
 
-              <div style={{textAlign:"center",padding:10}}>
-                <p style={{fontSize:16,fontWeight:900,color:OR,fontStyle:"italic"}}>"{fbData.motivation}"</p>
-              </div>
+                  <div style={{background:ORBG, borderRadius:14, padding:16, marginBottom:20}}>
+                    <h4 style={{fontSize:13, fontWeight:900, color:"#2D1B00", marginBottom:12, display:"flex", alignItems:"center", gap:6}}>
+                      <span>🎯</span> {selectedAttest === fbData.predictedAttest ? "Hoe behoud ik dit?" : "Wat moet ik doen?"}
+                    </h4>
+                    <ul style={{margin:0, paddingLeft:20, fontSize:13, color:"#5D3D1A"}}>
+                      {fbData.attests[selectedAttest].actionPlan.map((step, i) => (
+                        <li key={i} style={{marginBottom:8, fontWeight:700}}>{step}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div style={{borderTop:"1px solid #E5E7EB", paddingTop:16}}>
+                    <h4 style={{fontSize:13, fontWeight:900, color:"#2D1B00", marginBottom:8}}>
+                      ⚠️ Gevolgen
+                    </h4>
+                    <p style={{fontSize:12, color:"#6B7280", fontStyle:"italic", margin:0}}>
+                      {fbData.attests[selectedAttest].consequences}
+                    </p>
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
           <div style={{fontSize:12,color:"#8B6242",marginBottom:20,textAlign:"center",fontStyle:"italic",lineHeight:1.5}}>
             ⚠️ Dit is een indicatie. De officiële beslissing ligt altijd bij de school.
           </div>
-          <button style={S.btn} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
+          
+          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+            <button style={{ ...S.btn, flex: 1 }} onClick={() => setScreen("progression")}>📈 Mijn Progressie</button>
+            <button 
+              style={{ ...S.btn, flex: 1, background: saveSuccess ? "#22C55E" : OR }} 
+              onClick={saveTodayScore}
+              disabled={saveSuccess}
+            >
+              {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla score op"}
+            </button>
+          </div>
+
+          <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-            <button style={S.btnSec} onClick={()=>setScreen("school_info")}>
-              ⚙️ Gegevens aanpassen
+            <button style={S.btnSec} onClick={()=>setScreen("grades")}>
+              ⚙️ Punten aanpassen
             </button>
             <button style={S.btnSec} onClick={()=>{
               setVakken([]);
@@ -1667,7 +1853,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               setScore(null);
               setFbData(null);
               setReportImage(null);
-              setScreen("school_info");
+              setScreen("grades");
             }}>
               🔄 Nieuwe puntenlijst
             </button>
@@ -1849,6 +2035,267 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
+  // ── 13. PROGRESSIE PAGINA ──────────────────────────────────
+  const ProgressionPage = () => {
+    const prognosis = calculatePrognosis(progression);
+    const today = new Date().toISOString().split('T')[0];
+    const alreadySaved = progression.some(p => p.date === today);
+
+    return (
+      <div style={{ paddingBottom: 40 }}>
+        <button style={S.back} onClick={() => setScreen("results")}>← Terug naar resultaat</button>
+        
+        <div style={S.card}>
+          <div style={{ textAlign: "center", marginBottom: 24 }}>
+            <div style={{ fontSize: 48, marginBottom: 12 }}>📈</div>
+            <h2 style={S.h2}>Mijn Progressie</h2>
+            <p style={S.sub}>Volg je groei doorheen het jaar. Elke dag telt!</p>
+          </div>
+
+          {/* Grafiek Sectie */}
+          <div style={{ 
+            background: "white", 
+            borderRadius: 20, 
+            padding: "20px 10px", 
+            border: `2px solid ${ORPL}`,
+            marginBottom: 24,
+            height: 300
+          }}>
+            {progression.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={progression}>
+                  <defs>
+                    <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={OR} stopOpacity={0.3}/>
+                      <stop offset="95%" stopColor={OR} stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
+                  <XAxis 
+                    dataKey="date" 
+                    tick={{ fontSize: 10, fontWeight: 700, fill: "#8B6242" }}
+                    axisLine={false}
+                    tickLine={false}
+                    tickFormatter={(str) => str.split('-').slice(1).reverse().join('/')}
+                  />
+                  <YAxis 
+                    domain={[0, 100]} 
+                    tick={{ fontSize: 10, fontWeight: 700, fill: "#8B6242" }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)", fontWeight: 800 }}
+                    itemStyle={{ color: OR }}
+                  />
+                  <ReferenceLine y={70} stroke="#22C55E" strokeDasharray="3 3" label={{ position: 'right', value: 'A-Attest', fill: '#22C55E', fontSize: 10, fontWeight: 800 }} />
+                  <ReferenceLine y={50} stroke="#F59E0B" strokeDasharray="3 3" label={{ position: 'right', value: 'B-Attest', fill: '#F59E0B', fontSize: 10, fontWeight: 800 }} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="score" 
+                    stroke={OR} 
+                    strokeWidth={4}
+                    fillOpacity={1} 
+                    fill="url(#colorScore)" 
+                    animationDuration={1500}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#8B6242", fontWeight: 700, textAlign: "center", padding: 20 }}>
+                Nog geen gegevens beschikbaar.<br/>Sla je score op om je grafiek te starten!
+              </div>
+            )}
+          </div>
+
+          {/* Prognose Sectie */}
+          {prognosis && (
+            <div style={{ 
+              background: prognosis.trend === "stijgend" ? "#F0FDF4" : (prognosis.trend === "dalend" ? "#FEF2F2" : "#FFFBEB"),
+              border: `2px solid ${prognosis.trend === "stijgend" ? "#DCFCE7" : (prognosis.trend === "dalend" ? "#FEE2E2" : "#FEF3C7")}`,
+              borderRadius: 20,
+              padding: 20,
+              marginBottom: 24
+            }}>
+              <h3 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🔮</span> Prognose Attestering
+              </h3>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                <div style={{ 
+                  width: 64, height: 64, borderRadius: 100, 
+                  background: "white", display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: 24, fontWeight: 900, color: OR, border: `3px solid ${ORPL}`
+                }}>
+                  {Math.round(prognosis.prognosisScore)}%
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontWeight: 800, fontSize: 14, color: "#2D1B00" }}>
+                    Trend: <span style={{ color: prognosis.trend === "stijgend" ? "#16A34A" : (prognosis.trend === "dalend" ? "#DC2626" : "#D97706") }}>
+                      {prognosis.trend.toUpperCase()} {prognosis.trend === "stijgend" ? "📈" : (prognosis.trend === "dalend" ? "📉" : "➡️")}
+                    </span>
+                  </p>
+                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8B6242", lineHeight: 1.4 }}>
+                    {prognosis.trend === "stijgend" && "Je bent goed bezig! Als je deze lijn doortrekt, ziet je attestering er rooskleurig uit."}
+                    {prognosis.trend === "dalend" && "Let op! Je score daalt. Probeer extra inzet te tonen om je attestering veilig te stellen."}
+                    {prognosis.trend === "stabiel" && prognosis.prognosisScore > 70 && "Je behoudt een sterk niveau. Dit is zeer positief voor je A-attest!"}
+                    {prognosis.trend === "stabiel" && prognosis.prognosisScore <= 70 && "Je blijft stabiel, maar er is ruimte voor groei om een hoger attest te bereiken."}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Historiek Lijst */}
+          <div style={{ background: ORBG, borderRadius: 20, padding: 20 }}>
+            <h3 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 16 }}>📅 Historiek</h3>
+            {progression.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {[...progression].reverse().map(p => (
+                  <div key={p.id} style={{ 
+                    background: "white", borderRadius: 12, padding: "12px 16px", 
+                    display: "flex", justifyContent: "space-between", alignItems: "center",
+                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
+                  }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: "#2D1B00" }}>{p.date.split('-').reverse().join('/')}</div>
+                      <div style={{ fontSize: 11, color: "#8B6242", fontWeight: 700 }}>Score: {p.score}%</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <div style={{ fontSize: 18, fontWeight: 900, color: p.score >= 70 ? "#22C55E" : (p.score >= 50 ? "#F59E0B" : "#EF4444") }}>
+                        {p.score}%
+                      </div>
+                      <button 
+                        onClick={() => deleteProgressionPoint(p.date)}
+                        style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", padding: 4 }}
+                        title="Verwijderen"
+                      >🗑️</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p style={{ textAlign: "center", fontSize: 13, color: "#8B6242", fontStyle: "italic" }}>Geen historiek gevonden.</p>
+            )}
+          </div>
+
+          {!alreadySaved && score !== null && (
+            <button 
+              style={{ ...S.btn, marginTop: 24 }} 
+              onClick={saveTodayScore}
+              disabled={saveSuccess}
+            >
+              {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla huidige score op voor vandaag"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ── 12. INSTELLINGEN MODAL ──────────────────────────────────
+  const SettingsModal = () => {
+    const [ls, setLs] = useState(school);
+    const [lj, setLj] = useState(jaar);
+    const [ll, setLl] = useState(leeftijd);
+    const [lr, setLr] = useState(richting);
+    const [ln, setLn] = useState(currentUser?.naam || "");
+    const [bezig, setBezig] = useState(false);
+    const [success, setSuccess] = useState(false);
+
+    if (!showSettings) return null;
+
+    const opslaan = async () => {
+      setBezig(true);
+      try {
+        if (currentUser?.uid) {
+          await setDoc(doc(db, "users", currentUser.uid), {
+            ...currentUser,
+            naam: ln,
+            school: ls,
+            jaar: lj,
+            leeftijd: ll,
+            richting: lr
+          });
+          setSchool(ls); setJaar(lj); setLeeftijd(ll); setRichting(lr);
+          setCurrentUser({ ...currentUser, naam: ln, school: ls, jaar: lj, leeftijd: ll, richting: lr });
+          setSuccess(true);
+          setTimeout(() => {
+            setSuccess(false);
+            setShowSettings(false);
+          }, 1500);
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
+      } finally {
+        setBezig(false);
+      }
+    };
+
+    return (
+      <div style={{
+        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1100,
+        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+        backdropFilter:"blur(4px)"
+      }}>
+        <div style={{...S.card, width:"100%", maxWidth:450, position:"relative", animation:"bounce .3s ease"}}>
+          <button 
+            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
+            onClick={() => setShowSettings(false)}
+          >✕</button>
+          
+          <div style={{textAlign:"center", marginBottom:20}}>
+            <div style={{fontSize:40, marginBottom:8}}>⚙️</div>
+            <h2 style={S.h2}>Mijn Instellingen</h2>
+            <p style={S.sub}>Pas hier je profielgegevens aan.</p>
+          </div>
+
+          {success ? (
+            <div style={{...S.ok, textAlign:"center", padding:20}}>
+              <div style={{fontSize:30, marginBottom:10}}>✅</div>
+              Gegevens succesvol bijgewerkt!
+            </div>
+          ) : (
+            <div style={{maxHeight:"70vh", overflowY:"auto", paddingRight:10}}>
+              <label style={S.lbl}>Voornaam</label>
+              <input style={S.input} value={ln} onChange={e=>setLn(e.target.value)} placeholder="Jouw voornaam"/>
+
+              <label style={S.lbl}>🏫 School</label>
+              <input style={S.input} value={ls} onChange={e=>setLs(e.target.value)} placeholder="Naam van je school"/>
+
+              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
+                <div>
+                  <label style={S.lbl}>📅 Jaar / Graad</label>
+                  <select style={{...S.input}} value={lj} onChange={e=>setLj(e.target.value)}>
+                    <option value="">Kies jaar...</option>
+                    {["1ste leerjaar","2de leerjaar","3de leerjaar","4de leerjaar","5de leerjaar","6de leerjaar",
+                      "1ste middelbaar","2de middelbaar","3de middelbaar","4de middelbaar","5de middelbaar","6de middelbaar"].map(j=>(
+                      <option key={j} value={j}>{j}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={S.lbl}>🎂 Leeftijd</label>
+                  <input style={S.input} type="number" value={ll} onChange={e=>setLl(e.target.value)} placeholder="Bv. 14"/>
+                </div>
+              </div>
+
+              <label style={S.lbl}>🚀 Studierichting</label>
+              <input style={S.input} value={lr} onChange={e=>setLr(e.target.value)} placeholder="Bv. Economie-Wiskunde"/>
+
+              <button 
+                style={{...S.btn, marginTop:10}} 
+                onClick={opslaan}
+                disabled={bezig}
+              >
+                {bezig ? "⏳ Opslaan..." : "Opslaan ✅"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   // ════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════
@@ -1875,12 +2322,21 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       `}</style>
       <Blobs/>
       <FeedbackModal/>
+      <SettingsModal/>
 
       <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <div style={{fontWeight:900,color:OR,fontSize:16}}>📊 RapportRadar</div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+              <button 
+                onClick={() => setShowSettings(true)}
+                style={{
+                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:10,
+                  padding:"5px 8px", fontSize:16, cursor:"pointer", display:"flex", alignItems:"center", gap:4
+                }}
+                title="Instellingen"
+              >⚙️</button>
               <button 
                 onClick={() => setShowFeedback(true)}
                 style={{
@@ -1900,14 +2356,15 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         )}
         {screen==="loading"            && <LoadingScreen/>}
         {screen==="welcome"            && <WelcomeScreen/>}
+        {screen==="dashboard"          && <DashboardScreen/>}
         {screen==="register"           && <RegisterScreen/>}
         {screen==="login"              && <LoginScreen/>}
-        {screen==="school_info"        && <SchoolInfoScreen/>}
         {screen==="important_subjects" && <ImportantSubjectsScreen/>}
         {screen==="grades"             && <GradesScreen/>}
         {screen==="behavior"           && <BehaviorScreen/>}
         {screen==="results"            && <ResultsScreen/>}
         {screen==="breakdown"          && <BreakdownScreen/>}
+        {screen==="progression"        && <ProgressionPage/>}
       </div>
     </div>
   );

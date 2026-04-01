@@ -11,6 +11,14 @@ service cloud.firestore {
     //   - naam: string (required) - User's first name
     //   - email: string (required, email format) - User's email address
     //
+    // Collection: users/{userId}/progression
+    // Document ID: {date} (YYYY-MM-DD)
+    // Fields:
+    //   - userId: string (required)
+    //   - score: number (required)
+    //   - date: string (required, YYYY-MM-DD)
+    //   - timestamp: timestamp (required)
+    //
     // ===============================================================
 
     // ===============================================================
@@ -54,10 +62,25 @@ service cloud.firestore {
              (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5));
     }
 
+    function isValidProgression(data) {
+      return data.keys().hasOnly(['userId', 'score', 'date', 'timestamp']) &&
+             data.userId is string &&
+             data.score is number &&
+             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
+             data.timestamp is timestamp;
+    }
+
     match /users/{userId} {
       allow read: if isOwner(userId);
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/progression/{date} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidProgression(request.resource.data);
+      allow update: if isOwner(userId) && isValidProgression(request.resource.data);
       allow delete: if isOwner(userId);
     }
 
