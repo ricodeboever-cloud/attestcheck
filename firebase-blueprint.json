@@ -51,6 +51,46 @@
         "score": {
           "type": "number",
           "description": "User's calculated score"
+        },
+        "xp": {
+          "type": "number",
+          "description": "User's experience points"
+        },
+        "rank": {
+          "type": "string",
+          "description": "User's current rank"
+        },
+        "focusPoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "completed": { "type": "boolean" },
+              "xpValue": { "type": "number" },
+              "createdAt": { "type": "string", "format": "date-time" }
+            }
+          },
+          "description": "List of focus points (goals) for the user"
+        },
+        "badges": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of earned badge IDs"
+        },
+        "customBadges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "name": { "type": "string" },
+              "description": { "type": "string" },
+              "requirementText": { "type": "string" }
+            }
+          },
+          "description": "List of dynamically generated badges"
         }
       },
       "required": ["naam", "email"]

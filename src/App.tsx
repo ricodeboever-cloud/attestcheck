@@ -171,6 +171,17 @@ const CONFIG = {
     { id: "schrijven", vraag: "Kan ik vlot Nederlandse zinnen schrijven?", emoji: "✍️" },
     { id: "spreken",   vraag: "Kan ik vlot Nederlandse zinnen spreken?",   emoji: "🗣️" },
   ],
+  BADGES: [
+    { id: "first_step", name: "Eerste Stap 👣", description: "Voltooi je eerste focus punt.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 1 },
+    { id: "focus_fan", name: "Focus Fanaat 🎯", description: "Voltooi 5 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 5 },
+    { id: "consistency", name: "Consistentie Koning 👑", description: "Voltooi 10 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 10 },
+    { id: "veteran", name: "Rapport Radar Veteraan 🎖️", description: "Sla 3 verschillende scores op.", requirement: (user: any, progression: any[]) => progression.length >= 3 },
+    { id: "rising_star", name: "Stijgende Lijn 📈", description: "Heb een stijgende trend in je progressie.", requirement: (user: any, progression: any[]) => {
+      if (progression.length < 2) return false;
+      return progression[progression.length - 1].score > progression[0].score;
+    }},
+    { id: "expert_rank", name: "Elite Student 🎓", description: "Bereik de rang 'Expert'.", requirement: (user: any) => (user.xp || 0) >= 600 },
+  ]
 };
 
 // ── Kleuren ────────────────────────────────────────────────
@@ -206,8 +217,129 @@ function AttestatieApp() {
   const [progression,    setProgression]   = useState<any[]>([]);
   const [progressionLoading, setProgressionLoading] = useState(false);
   const [saveSuccess,    setSaveSuccess]   = useState(false);
+  const [newBadge,       setNewBadge]      = useState<any>(null);
 
   // ── 9. PROGRESSIE LOGICA ──────────────────────────────
+  const generateNewFocusPoint = async (updatedUser: any) => {
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) return;
+      const ai = new GoogleGenAI({ apiKey });
+      const prompt = `Je bent een schoolcoach. De student heeft net een focusdoel voltooid.
+      Genereer ÉÉN nieuw, concreet en haalbaar focusdoel (max 10 woorden) voor deze student.
+      Huidige vakken: ${updatedUser.vakken?.map((v: any) => v.naam).join(", ")}
+      Huidige score: ${updatedUser.score}%
+      Geef alleen de tekst van het doel terug, niks anders.`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+
+      const newText = response.text?.trim() || "Blijf gefocust op je doelen!";
+      const newPoint = {
+        id: Date.now().toString(),
+        text: newText,
+        completed: false,
+        xpValue: 50,
+        createdAt: new Date().toISOString()
+      };
+
+      const finalPoints = [...(updatedUser.focusPoints || []), newPoint];
+      await setDoc(doc(db, "users", updatedUser.uid), {
+        ...updatedUser,
+        focusPoints: finalPoints
+      });
+      setCurrentUser({ ...updatedUser, focusPoints: finalPoints });
+    } catch (error) {
+      console.error("Error generating new focus point:", error);
+    }
+  };
+
+  const generateNewBadge = async (updatedUser: any, earnedBadgeId: string) => {
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) return;
+      const ai = new GoogleGenAI({ apiKey });
+      
+      const earnedBadge = CONFIG.BADGES.find(b => b.id === earnedBadgeId) || 
+                         (updatedUser.customBadges || []).find((b: any) => b.id === earnedBadgeId);
+      
+      if (!earnedBadge) return;
+
+      const prompt = `Je bent een gamification expert. De student heeft de badge "${earnedBadge.name}" behaald (${earnedBadge.description}).
+      Bedenk ÉÉN nieuwe, uitdagendere badge (naam + beschrijving + vereiste in tekst) die hierop volgt.
+      Geef dit terug in JSON formaat met velden: name, description, requirementText.
+      De requirementText moet een simpele voorwaarde zijn (bijv. "Voltooi 15 focus punten").`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+
+      const data = JSON.parse(response.text || "{}");
+      if (!data.name) return;
+
+      const newBadge = {
+        id: `custom_${Date.now()}`,
+        name: data.name,
+        description: data.description,
+        requirementText: data.requirementText,
+        // We'll use a generic requirement for custom badges for now, 
+        // or try to parse the requirementText if we want to be fancy.
+        // For simplicity, let's say custom badges are earned by completing more focus points.
+        requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= ((user.focusPoints?.filter((p: any) => p.completed).length || 0) + 5)
+      };
+
+      const customBadges = [...(updatedUser.customBadges || []), newBadge];
+      await setDoc(doc(db, "users", updatedUser.uid), {
+        ...updatedUser,
+        customBadges: customBadges
+      });
+      setCurrentUser({ ...updatedUser, customBadges: customBadges });
+    } catch (error) {
+      console.error("Error generating new badge:", error);
+    }
+  };
+
+  const checkBadges = async (updatedUser: any, currentProgression: any[]) => {
+    const earnedBadges = updatedUser.badges || [];
+    const newlyEarned = [];
+    const allAvailableBadges = [...CONFIG.BADGES, ...(updatedUser.customBadges || [])];
+
+    for (const badge of allAvailableBadges) {
+      if (!earnedBadges.includes(badge.id)) {
+        // For custom badges, we might need to handle requirements differently if they are text-based
+        // but for now we use the function if it exists.
+        if (typeof badge.requirement === 'function' && badge.requirement(updatedUser, currentProgression)) {
+          newlyEarned.push(badge.id);
+        }
+      }
+    }
+
+    if (newlyEarned.length > 0) {
+      const allEarned = [...earnedBadges, ...newlyEarned];
+      try {
+        const userToUpdate = { ...updatedUser, badges: allEarned };
+        await setDoc(doc(db, "users", updatedUser.uid), userToUpdate);
+        setCurrentUser(userToUpdate);
+        
+        // Show notification for the first new badge
+        const badgeInfo = allAvailableBadges.find(b => b.id === newlyEarned[0]);
+        setNewBadge(badgeInfo);
+        setTimeout(() => setNewBadge(null), 5000);
+
+        // Generate a new badge challenge for each earned badge
+        for (const bId of newlyEarned) {
+          generateNewBadge(userToUpdate, bId);
+        }
+      } catch (error) {
+        console.error("Error saving badges:", error);
+      }
+    }
+  };
+
   const fetchProgression = async () => {
     if (!currentUser) return;
     setProgressionLoading(true);
@@ -238,7 +370,12 @@ function AttestatieApp() {
       });
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
-      fetchProgression();
+      const { getDocs, query, orderBy } = await import("firebase/firestore");
+      const q = query(collection(db, path), orderBy("date", "asc"));
+      const snap = await getDocs(q);
+      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setProgression(data);
+      checkBadges(currentUser, data);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/progression/${today}`);
     }
@@ -255,6 +392,69 @@ function AttestatieApp() {
       handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/progression/${date}`);
     }
   };
+
+  const RANKS = [
+    { min: 0, name: "Starter 🔰", color: "#94A3B8" },
+    { min: 100, name: "Groeier 🌱", color: "#22C55E" },
+    { min: 300, name: "Strijder 💪", color: "#3B82F6" },
+    { min: 600, name: "Expert 🎓", color: "#A855F7" },
+    { min: 1000, name: "Meester 🏆", color: "#F59E0B" },
+  ];
+
+  const getRankInfo = (xp: number) => {
+    return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
+  };
+
+  const addXP = async (amount: number) => {
+    if (!currentUser) return;
+    const newXP = (currentUser.xp || 0) + amount;
+    const newRank = getRankInfo(newXP).name;
+    
+    try {
+      await setDoc(doc(db, "users", currentUser.uid), {
+        ...currentUser,
+        xp: newXP,
+        rank: newRank
+      });
+      setCurrentUser({ ...currentUser, xp: newXP, rank: newRank });
+    } catch (error) {
+      console.error("Error updating XP:", error);
+    }
+  };
+
+  const toggleFocusPoint = async (pointId: string) => {
+    if (!currentUser) return;
+    const points = [...(currentUser.focusPoints || [])];
+    const idx = points.findIndex(p => p.id === pointId);
+    if (idx === -1) return;
+
+    const point = points[idx];
+    const wasCompleted = point.completed;
+    point.completed = !wasCompleted;
+
+    try {
+      const updatedUser = { 
+        ...currentUser, 
+        focusPoints: points,
+        xp: (currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue),
+        rank: getRankInfo((currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue)).name
+      };
+      await setDoc(doc(db, "users", currentUser.uid), updatedUser);
+      setCurrentUser(updatedUser);
+      if (point.completed) {
+        checkBadges(updatedUser, progression);
+        generateNewFocusPoint(updatedUser);
+      }
+    } catch (error) {
+      console.error("Error toggling focus point:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (currentUser && screen === "progression") {
+      fetchProgression();
+    }
+  }, [currentUser, screen]);
 
   const calculatePrognosis = (data: any[]) => {
     if (data.length < 2) return null;
@@ -278,11 +478,13 @@ function AttestatieApp() {
     return { trend, prognosisScore };
   };
 
-  useEffect(() => {
-    if (currentUser && screen === "progression") {
-      fetchProgression();
-    }
-  }, [currentUser, screen]);
+  interface FocusPoint {
+    id: string;
+    text: string;
+    completed: boolean;
+    xpValue: number;
+    createdAt: string;
+  }
 
   interface AttestInfo {
     status: "behaald" | "mogelijk" | "gevaar";
@@ -301,6 +503,7 @@ function AttestatieApp() {
       C: AttestInfo;
     };
     motivation: string;
+    focusPoints: string[];
   }
 
   const cleanJSON = (text: string) => {
@@ -524,7 +727,8 @@ Geef voor ELK van de drie attesten (A, B en C) een analyse:
 4. actionPlan: 3-4 concrete stappen om dit te bereiken/behouden.
 5. consequences: Gevolgen van dit attest.
 6. emoji: Passende emoji.
-Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.`;
+Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
+Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 10 woorden per doel) die de student zelf kan afvinken (bijv. 'Elke dag 15 min woordjes Frans leren').`;
 
       const contents: any[] = [{ text: prompt }];
       if (reportImage) {
@@ -586,9 +790,10 @@ Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE sam
                 },
                 required: ["A", "B", "C"]
               },
-              motivation: { type: Type.STRING }
+              motivation: { type: Type.STRING },
+              focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
             },
-            required: ["predictedAttest", "attests", "motivation"]
+            required: ["predictedAttest", "attests", "motivation", "focusPoints"]
           }
         }
       });
@@ -599,6 +804,31 @@ Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE sam
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
       if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
       
+      // Focus points omzetten naar objecten voor de checklist
+      if (data.focusPoints && currentUser) {
+        const newFocusPoints: FocusPoint[] = data.focusPoints.map((text, i) => ({
+          id: `fp_${Date.now()}_${i}`,
+          text,
+          completed: false,
+          xpValue: 20,
+          createdAt: new Date().toISOString()
+        }));
+        
+        // Opslaan in Firestore
+        await setDoc(doc(db, "users", currentUser.uid), {
+          ...currentUser,
+          focusPoints: newFocusPoints,
+          xp: (currentUser.xp || 0) + 50, // 50 XP voor de analyse zelf
+          rank: getRankInfo((currentUser.xp || 0) + 50).name
+        });
+        setCurrentUser({ 
+          ...currentUser, 
+          focusPoints: newFocusPoints, 
+          xp: (currentUser.xp || 0) + 50,
+          rank: getRankInfo((currentUser.xp || 0) + 50).name
+        });
+      }
+
       setFbData(data);
       setSelectedAttest(data.predictedAttest);
     } catch (error: any) {
@@ -845,20 +1075,141 @@ Voorbeeld: [{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
 Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, enkel de JSON.`;
 
   // ── 1. WELKOMSTSCHERM ──────────────────────────────────────
-  const WelcomeScreen = () => (
-    <div style={{textAlign:"center",paddingTop:60}}>
-      <div style={{fontSize:76,marginBottom:12}}>📊</div>
-      <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
-      <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
-        Ontdek welk attest je op dit moment zou krijgen! 🎓
-      </p>
-      <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
-      <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
-    </div>
-  );
+  const [showTutorial,  setShowTutorial]  = useState(false);
+  const [tutorialStep,  setTutorialStep]  = useState(0);
+
+  // ── 1. WELCOME SCREEN ──────────────────────────────────────
+  const TutorialModal = () => {
+    if (!showTutorial) return null;
+    
+    const steps = [
+      { icon: "📸", color: "#3B82F6", label: "Upload" },
+      { icon: "✨", color: "#A855F7", label: "Analyse" },
+      { icon: "🏆", color: "#F59E0B", label: "Resultaat" }
+    ];
+
+    return (
+      <div style={{
+        position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:3000,
+        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+        backdropFilter:"blur(10px)"
+      }}>
+        <motion.div 
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          style={{...S.card, width:"100%", maxWidth:400, textAlign: "center", padding: 40, position: "relative"}}
+        >
+          <button 
+            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
+            onClick={() => setShowTutorial(false)}
+          >✕</button>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={tutorialStep}
+              initial={{ x: 50, opacity: 0 }}
+              animate={{ x: 0, opacity: 1 }}
+              exit={{ x: -50, opacity: 0 }}
+              style={{ padding: "20px 0" }}
+            >
+              <div style={{ 
+                fontSize: 120, marginBottom: 30, 
+                filter: `drop-shadow(0 10px 20px ${steps[tutorialStep].color}44)` 
+              }}>
+                {steps[tutorialStep].icon}
+              </div>
+              
+              {/* Visual indicators for what's happening */}
+              {tutorialStep === 0 && (
+                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                  <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ fontSize: 32 }}>📄</motion.div>
+                  <div style={{ fontSize: 32 }}>➡️</div>
+                  <div style={{ fontSize: 32 }}>📱</div>
+                </div>
+              )}
+              {tutorialStep === 1 && (
+                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 3, ease: "linear" }} style={{ fontSize: 32 }}>⚙️</motion.div>
+                  <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1 }} style={{ fontSize: 32 }}>🧠</motion.div>
+                </div>
+              )}
+              {tutorialStep === 2 && (
+                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                  <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} style={{ fontSize: 32 }}>⭐</motion.div>
+                  <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.5 }} style={{ fontSize: 32 }}>📈</motion.div>
+                </div>
+              )}
+            </motion.div>
+          </AnimatePresence>
+
+          <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 40, marginBottom: 30 }}>
+            {steps.map((_, i) => (
+              <div 
+                key={i} 
+                style={{ 
+                  width: i === tutorialStep ? 24 : 8, 
+                  height: 8, 
+                  borderRadius: 4, 
+                  background: i === tutorialStep ? OR : ORPL,
+                  transition: "all 0.3s"
+                }} 
+              />
+            ))}
+          </div>
+
+          <button 
+            style={S.btn} 
+            onClick={() => {
+              if (tutorialStep < steps.length - 1) {
+                setTutorialStep(tutorialStep + 1);
+              } else {
+                setShowTutorial(false);
+              }
+            }}
+          >
+            {tutorialStep < steps.length - 1 ? "Volgende ➡️" : "Ik snap het! 🚀"}
+          </button>
+        </motion.div>
+      </div>
+    );
+  };
+
+  const WelcomeScreen = () => {
+    useEffect(() => {
+      const hasSeen = sessionStorage.getItem("hasSeenTutorial");
+      if (!hasSeen) {
+        setShowTutorial(true);
+        sessionStorage.setItem("hasSeenTutorial", "true");
+      }
+    }, []);
+
+    return (
+      <div style={{textAlign:"center",paddingTop:60}}>
+        <div style={{fontSize:76,marginBottom:12}}>📊</div>
+        <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
+        <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
+          Ontdek welk attest je op dit moment zou krijgen! 🎓
+        </p>
+        <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
+        <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
+        <button 
+          style={{...S.btnSec, marginTop: 20, border: "none", background: "transparent", color: OR, textDecoration: "underline"}} 
+          onClick={() => {
+            setTutorialStep(0);
+            setShowTutorial(true);
+          }}
+        >
+          Hoe werkt het? ❓
+        </button>
+      </div>
+    );
+  };
 
   // ── 1.5 DASHBOARD (LANDING VOOR INGELOGDE GEBRUIKERS) ────────
   const DashboardScreen = () => {
+    const xp = currentUser?.xp || 0;
+    const rank = getRankInfo(xp);
+
     const startNieuweAnalyse = () => {
       setVakken([]);
       setGedragAntw({});
@@ -870,7 +1221,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     };
 
     return (
-      <div style={{paddingTop:20}}>
+      <div style={{paddingTop:10}}>
         <div style={{...S.card, textAlign:"center", padding:30}}>
           <div style={{fontSize:64, marginBottom:16}}>🚀</div>
           <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
@@ -891,8 +1242,11 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             Start Nieuwe Analyse 📊
           </button>
 
-          <button style={S.btn} onClick={() => setScreen("progression")}>
-            Mijn Progressie 📈
+          <button 
+            style={{ ...S.btn, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
+            onClick={() => setScreen("game")}
+          >
+            Mijn Spel & Progressie 🎮
           </button>
           
           <button style={S.btnSec} onClick={()=>setShowSettings(true)}>
@@ -1831,7 +2185,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           </div>
           
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <button style={{ ...S.btn, flex: 1 }} onClick={() => setScreen("progression")}>📈 Mijn Progressie</button>
+            <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
             <button 
               style={{ ...S.btn, flex: 1, background: saveSuccess ? "#22C55E" : OR }} 
               onClick={saveTodayScore}
@@ -1840,6 +2194,15 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla score op"}
             </button>
           </div>
+
+          {fbData && (
+            <button 
+              style={{ ...S.btn, background: "#3B82F6", boxShadow: "0 8px 24px rgba(59, 130, 246, 0.3)" }} 
+              onClick={() => setScreen("game")}
+            >
+              🎯 Bekijk Focus Checklist
+            </button>
+          )}
 
           <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
@@ -2035,24 +2398,260 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
-  // ── 13. PROGRESSIE PAGINA ──────────────────────────────────
-  const ProgressionPage = () => {
+  // ── 13. GAME SCREEN (GAMIFICATION HUB) ─────────────────────
+  const BadgeNotification = () => {
+    if (!newBadge) return null;
+    return (
+      <motion.div
+        initial={{ y: 100, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        exit={{ y: 100, opacity: 0 }}
+        style={{
+          position: "fixed", bottom: 40, left: "50%", transform: "translateX(-50%)",
+          zIndex: 2000, background: "white", padding: "16px 24px", borderRadius: 24,
+          boxShadow: "0 10px 25px rgba(0,0,0,0.2)", display: "flex", alignItems: "center", gap: 16,
+          border: `2px solid ${OR}`, width: "90%", maxWidth: 400
+        }}
+      >
+        <div style={{ fontSize: 40 }}>{newBadge.name.split(' ').pop()}</div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 800, color: OR, textTransform: "uppercase" }}>Nieuwe Badge Behaald! 🏆</div>
+          <div style={{ fontSize: 18, fontWeight: 900, color: "#2D1B00" }}>{newBadge.name}</div>
+          <div style={{ fontSize: 13, color: "#8B6242" }}>{newBadge.description}</div>
+        </div>
+      </motion.div>
+    );
+  };
+
+  const GameScreen = () => {
+    const xp = currentUser?.xp || 0;
+    const rank = getRankInfo(xp);
+    const nextRank = RANKS.find(r => r.min > xp);
+    const progress = nextRank ? ((xp - rank.min) / (nextRank.min - rank.min)) * 100 : 100;
     const prognosis = calculatePrognosis(progression);
     const today = new Date().toISOString().split('T')[0];
     const alreadySaved = progression.some(p => p.date === today);
 
     return (
       <div style={{ paddingBottom: 40 }}>
-        <button style={S.back} onClick={() => setScreen("results")}>← Terug naar resultaat</button>
+        <button style={S.back} onClick={() => setScreen("dashboard")}>← Terug naar Dashboard</button>
         
-        <div style={S.card}>
-          <div style={{ textAlign: "center", marginBottom: 24 }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📈</div>
-            <h2 style={S.h2}>Mijn Progressie</h2>
-            <p style={S.sub}>Volg je groei doorheen het jaar. Elke dag telt!</p>
+        <div style={{textAlign:"center", marginBottom:24}}>
+          <div style={{fontSize:52, marginBottom:8}}>🎮</div>
+          <h2 style={S.h2}>Mijn Spel & Progressie</h2>
+          <p style={S.sub}>Hier vind je alles over je groei en beloningen.</p>
+        </div>
+
+        {/* XP & Rank Card */}
+        <div style={{...S.card, padding: 24, marginBottom: 20, background: `linear-gradient(135deg, white, ${ORBG})`, border: `2px solid ${ORPL}`}}>
+          <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 20 }}>
+            <div style={{ fontSize: 60, filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.1))" }}>{rank.name.split(' ')[1]}</div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: "#8B6242", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Huidige Status</div>
+              <div style={{ fontSize: 24, fontWeight: 900, color: rank.color }}>{rank.name}</div>
+            </div>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontSize: 28, fontWeight: 900, color: OR }}>{xp}</div>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "#8B6242" }}>TOTAAL XP</div>
+            </div>
           </div>
 
-          {/* Grafiek Sectie */}
+          <div style={{ background: "white", borderRadius: 20, padding: 16, border: "1px solid rgba(0,0,0,0.05)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13, fontWeight: 800 }}>
+              <span style={{color: "#64748B"}}>Voortgang naar volgende rang</span>
+              <span style={{color: OR}}>{Math.round(progress)}%</span>
+            </div>
+            <div style={{ width: "100%", height: 14, background: "#F1F5F9", borderRadius: 10, overflow: "hidden", border: "1px solid #E2E8F0" }}>
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                transition={{ duration: 1, ease: "easeOut" }}
+                style={{ height: "100%", background: `linear-gradient(90deg, ${OR}, ${ORL})` }}
+              />
+            </div>
+            {nextRank && (
+              <p style={{ fontSize: 12, color: "#8B6242", marginTop: 10, fontWeight: 700, textAlign: "center" }}>
+                Nog <span style={{color: OR}}>{nextRank.min - xp} XP</span> tot <span style={{color: nextRank.color}}>{nextRank.name}</span>
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Focus Checklist */}
+        {currentUser?.focusPoints && currentUser.focusPoints.length > 0 && (
+          <div style={{...S.card, padding: 24, marginBottom: 20}}>
+            <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
+              <span style={{fontSize: 24}}>🎯</span> Focus Checklist
+            </h3>
+            <p style={{...S.sub, marginBottom: 20}}>Voltooi deze doelen om extra XP te verdienen en sneller te stijgen in rang!</p>
+            <div style={{ 
+              display: "flex", 
+              flexDirection: "column", 
+              gap: 12,
+              maxHeight: 280, // Fits roughly 3 items (each ~80px + gap)
+              overflowY: "auto",
+              paddingRight: 8,
+              scrollbarWidth: "thin",
+              scrollbarColor: `${OR} #F1F5F9`
+            }}>
+              {[...(currentUser.focusPoints || [])]
+                .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
+                .map((p: any) => (
+                <motion.div 
+                  key={p.id} 
+                  layout
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => toggleFocusPoint(p.id)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 14, padding: "16px 20px",
+                    background: p.completed ? "#F0FDF4" : "#F8FAFC",
+                    borderRadius: 20, cursor: "pointer", transition: "all .2s",
+                    border: `2px solid ${p.completed ? "#DCFCE7" : "#F1F5F9"}`,
+                    boxShadow: p.completed ? "none" : "0 2px 8px rgba(0,0,0,0.02)"
+                  }}
+                >
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 10, border: `2.5px solid ${p.completed ? "#22C55E" : ORPL}`,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    background: p.completed ? "#22C55E" : "white", color: "white", fontSize: 16
+                  }}>
+                    {p.completed && "✓"}
+                  </div>
+                  <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: p.completed ? "#166534" : "#2D1B00", textDecoration: p.completed ? "line-through" : "none" }}>
+                    {p.text}
+                  </div>
+                  {!p.completed && (
+                    <div style={{ 
+                      fontSize: 11, fontWeight: 800, color: OR, background: ORBG, 
+                      padding: "4px 10px", borderRadius: 10, border: `1px solid ${ORPL}` 
+                    }}>
+                      +{p.xpValue} XP
+                    </div>
+                  )}
+                </motion.div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Badges Section */}
+        <div style={{...S.card, padding: 24, marginBottom: 20}}>
+          <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
+            <span style={{fontSize: 24}}>🏅</span> Mijn Badges
+          </h3>
+          <p style={{...S.sub, marginBottom: 20}}>Verzamel badges door doelen te bereiken en je rapport te verbeteren!</p>
+          
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            {[...CONFIG.BADGES, ...(currentUser?.customBadges || [])].map((badge: any) => {
+              const isEarned = currentUser?.badges?.includes(badge.id);
+              
+              const shareBadge = () => {
+                if (!isEarned) return;
+                const text = `🏆 Ik heb de badge "${badge.name}" behaald op RapportRadar! 📊\n\n${badge.description}\n\nCheck je eigen rapport op RapportRadar! 🚀`;
+                navigator.clipboard.writeText(text);
+                alert("Badge info gekopieerd naar klembord! Je kunt het nu delen op sociale media. 🚀");
+              };
+
+              return (
+                <motion.div
+                  key={badge.id}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={shareBadge}
+                  style={{
+                    background: "white",
+                    borderRadius: 24,
+                    padding: 0,
+                    border: `2px solid ${isEarned ? OR : "#F1F5F9"}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    textAlign: "center",
+                    opacity: isEarned ? 1 : 0.5,
+                    filter: isEarned ? "none" : "grayscale(80%)",
+                    position: "relative",
+                    overflow: "hidden",
+                    cursor: isEarned ? "pointer" : "default",
+                    boxShadow: isEarned ? `0 8px 20px ${OR}22` : "none"
+                  }}
+                >
+                  {/* Strava-like "Challenge" Header */}
+                  <div style={{ 
+                    width: "100%", 
+                    background: isEarned ? OR : "#F1F5F9", 
+                    padding: "4px 0",
+                    fontSize: 9,
+                    fontWeight: 900,
+                    color: isEarned ? "white" : "#94A3B8",
+                    textTransform: "uppercase",
+                    letterSpacing: 1.5
+                  }}>
+                    {isEarned ? "Challenge Voltooid" : "Badge Challenge"}
+                  </div>
+
+                  <div style={{ padding: "20px 12px 16px" }}>
+                    <div style={{ 
+                      fontSize: 56, marginBottom: 12, 
+                      filter: isEarned ? "drop-shadow(0 4px 12px rgba(244, 121, 32, 0.4))" : "none",
+                      transform: isEarned ? "scale(1.1)" : "scale(1)",
+                      transition: "transform 0.3s ease"
+                    }}>
+                      {badge.name.split(' ').pop()}
+                    </div>
+                    
+                    <div style={{ 
+                      fontSize: 15, fontWeight: 900, color: "#2D1B00", marginBottom: 6,
+                      lineHeight: 1.2
+                    }}>
+                      {badge.name.split(' ').slice(0, -1).join(' ')}
+                    </div>
+                    
+                    <div style={{ fontSize: 11, color: "#8B6242", fontWeight: 700, lineHeight: 1.4, minHeight: 32 }}>
+                      {badge.description}
+                    </div>
+                  </div>
+
+                  {/* Status Bar */}
+                  <div style={{
+                    width: "100%",
+                    padding: "10px",
+                    background: isEarned ? "#F0FDF4" : "#F8FAFC",
+                    borderTop: `1px solid ${isEarned ? "#DCFCE7" : "#F1F5F9"}`,
+                    fontSize: 10,
+                    fontWeight: 800,
+                    color: isEarned ? "#166534" : "#64748B",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 4
+                  }}>
+                    {isEarned ? (
+                      <><span>✅</span> BEHAALD</>
+                    ) : (
+                      <><span>🔒</span> NOG TE BEHALEN</>
+                    )}
+                  </div>
+                  
+                  {isEarned && (
+                    <div style={{
+                      position: "absolute", top: 32, right: 12,
+                      fontSize: 10, color: OR, fontWeight: 900,
+                      opacity: 0.6
+                    }}>
+                      SHARE ↗
+                    </div>
+                  )}
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Progressie Grafiek */}
+        <div style={S.card}>
+          <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
+            <span style={{fontSize: 24}}>📈</span> Mijn Progressie
+          </h3>
           <div style={{ 
             background: "white", 
             borderRadius: 20, 
@@ -2108,7 +2707,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             )}
           </div>
 
-          {/* Prognose Sectie */}
           {prognosis && (
             <div style={{ 
               background: prognosis.trend === "stijgend" ? "#F0FDF4" : (prognosis.trend === "dalend" ? "#FEF2F2" : "#FFFBEB"),
@@ -2117,9 +2715,9 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               padding: 20,
               marginBottom: 24
             }}>
-              <h3 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                <span>🔮</span> Prognose Attestering
-              </h3>
+              <h4 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🔮</span> Prognose
+              </h4>
               <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <div style={{ 
                   width: 64, height: 64, borderRadius: 100, 
@@ -2136,21 +2734,19 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                   </p>
                   <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8B6242", lineHeight: 1.4 }}>
                     {prognosis.trend === "stijgend" && "Je bent goed bezig! Als je deze lijn doortrekt, ziet je attestering er rooskleurig uit."}
-                    {prognosis.trend === "dalend" && "Let op! Je score daalt. Probeer extra inzet te tonen om je attestering veilig te stellen."}
-                    {prognosis.trend === "stabiel" && prognosis.prognosisScore > 70 && "Je behoudt een sterk niveau. Dit is zeer positief voor je A-attest!"}
-                    {prognosis.trend === "stabiel" && prognosis.prognosisScore <= 70 && "Je blijft stabiel, maar er is ruimte voor groei om een hoger attest te bereiken."}
+                    {prognosis.trend === "dalend" && "Let op! Je score daalt. Probeer extra inzet te tonen."}
+                    {prognosis.trend === "stabiel" && "Je behoudt een stabiel niveau. Ga zo door!"}
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Historiek Lijst */}
           <div style={{ background: ORBG, borderRadius: 20, padding: 20 }}>
-            <h3 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 16 }}>📅 Historiek</h3>
+            <h4 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 16 }}>📅 Historiek</h4>
             {progression.length > 0 ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {[...progression].reverse().map(p => (
+                {[...progression].reverse().slice(0, 5).map(p => (
                   <div key={p.id} style={{ 
                     background: "white", borderRadius: 12, padding: "12px 16px", 
                     display: "flex", justifyContent: "space-between", alignItems: "center",
@@ -2160,34 +2756,102 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                       <div style={{ fontSize: 14, fontWeight: 800, color: "#2D1B00" }}>{p.date.split('-').reverse().join('/')}</div>
                       <div style={{ fontSize: 11, color: "#8B6242", fontWeight: 700 }}>Score: {p.score}%</div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <div style={{ fontSize: 18, fontWeight: 900, color: p.score >= 70 ? "#22C55E" : (p.score >= 50 ? "#F59E0B" : "#EF4444") }}>
-                        {p.score}%
-                      </div>
-                      <button 
-                        onClick={() => deleteProgressionPoint(p.date)}
-                        style={{ background: "none", border: "none", fontSize: 18, cursor: "pointer", padding: 4 }}
-                        title="Verwijderen"
-                      >🗑️</button>
+                    <div style={{ fontSize: 18, fontWeight: 900, color: p.score >= 70 ? "#22C55E" : (p.score >= 50 ? "#F59E0B" : "#EF4444") }}>
+                      {p.score}%
                     </div>
                   </div>
                 ))}
+                {progression.length > 5 && (
+                  <p style={{textAlign:"center", fontSize:12, color:OR, fontWeight:800, marginTop:10}}>
+                    En nog {progression.length - 5} andere metingen...
+                  </p>
+                )}
               </div>
             ) : (
               <p style={{ textAlign: "center", fontSize: 13, color: "#8B6242", fontStyle: "italic" }}>Geen historiek gevonden.</p>
             )}
           </div>
-
-          {!alreadySaved && score !== null && (
-            <button 
-              style={{ ...S.btn, marginTop: 24 }} 
-              onClick={saveTodayScore}
-              disabled={saveSuccess}
-            >
-              {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla huidige score op voor vandaag"}
-            </button>
-          )}
         </div>
+      </div>
+    );
+  };
+
+  const [showProfile, setShowProfile] = useState(false);
+
+  const ProfileCard = () => {
+    if (!currentUser || !showProfile) return null;
+    const xp = currentUser.xp || 0;
+    const rank = getRankInfo(xp);
+    const nextRank = RANKS.find(r => r.min > xp);
+    const progress = nextRank ? ((xp - rank.min) / (nextRank.min - rank.min)) * 100 : 100;
+
+    return (
+      <div style={{
+        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1200,
+        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
+        backdropFilter:"blur(6px)"
+      }} onClick={() => setShowProfile(false)}>
+        <motion.div 
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          style={{...S.card, width:"100%", maxWidth:400, position:"relative", textAlign: "center"}}
+          onClick={e => e.stopPropagation()}
+        >
+          <button 
+            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
+            onClick={() => setShowProfile(false)}
+          >✕</button>
+
+          <div style={{ fontSize: 64, marginBottom: 16 }}>{rank.name.split(' ')[1]}</div>
+          <h2 style={S.h2}>{currentUser.naam}</h2>
+          <p style={{...S.sub, fontWeight: 800, color: rank.color, fontSize: 16, marginBottom: 20 }}>
+            {rank.name}
+          </p>
+
+          <div style={{ background: ORBG, borderRadius: 20, padding: 20, marginBottom: 20 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14, fontWeight: 800 }}>
+              <span>XP Voortgang</span>
+              <span>{xp} XP</span>
+            </div>
+            <div style={{ width: "100%", height: 12, background: ORPL, borderRadius: 10, overflow: "hidden" }}>
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${progress}%` }}
+                style={{ height: "100%", background: `linear-gradient(90deg, ${OR}, ${ORL})` }}
+              />
+            </div>
+            {nextRank && (
+              <p style={{ fontSize: 11, color: "#8B6242", marginTop: 8, fontWeight: 700 }}>
+                Nog {nextRank.min - xp} XP tot {nextRank.name}
+              </p>
+            )}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+            <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
+              <div style={{ fontSize: 20, marginBottom: 4 }}>📈</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Metingen</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>{progression.length}</div>
+            </div>
+            <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
+              <div style={{ fontSize: 20, marginBottom: 4 }}>🎯</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Focus Doelen</div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>
+                {currentUser.focusPoints?.filter((p: any) => p.completed).length || 0}
+              </div>
+            </div>
+          </div>
+
+          <button 
+            style={{ ...S.btn, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
+            onClick={() => {
+              setScreen("game");
+              setShowProfile(false);
+            }}
+          >
+            Bekijk Volledige Progressie 🎮
+          </button>
+        </motion.div>
       </div>
     );
   };
@@ -2323,6 +2987,9 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       <Blobs/>
       <FeedbackModal/>
       <SettingsModal/>
+      <ProfileCard/>
+      <BadgeNotification/>
+      <TutorialModal/>
 
       <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
@@ -2344,9 +3011,19 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                   padding:"5px 10px", fontSize:12, fontWeight:700, color:ORD, cursor:"pointer"
                 }}
               >💡 Feedback</button>
-              <div style={{fontSize:12,color:"#8B6242",background:ORBG,padding:"5px 10px",borderRadius:20,fontWeight:700}}>
-                👋 {currentUser.naam}
-              </div>
+              <button 
+                onClick={() => setShowProfile(true)}
+                style={{
+                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
+                  padding:"5px 12px", fontSize:12, fontWeight:800, color:ORD, cursor:"pointer",
+                  display: "flex", alignItems: "center", gap: 6
+                }}
+              >
+                <span>👋 {currentUser.naam}</span>
+                <span style={{ background: OR, color: "white", padding: "2px 6px", borderRadius: 8, fontSize: 10 }}>
+                  {getRankInfo(currentUser.xp || 0).name.split(' ')[0]}
+                </span>
+              </button>
               <button onClick={handleLogout} style={{
                 background:"none",border:`1.5px solid #E5E7EB`,borderRadius:10,
                 color:"#8B6242",fontSize:11,fontWeight:700,cursor:"pointer",padding:"5px 8px",fontFamily:"inherit",
@@ -2364,7 +3041,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         {screen==="behavior"           && <BehaviorScreen/>}
         {screen==="results"            && <ResultsScreen/>}
         {screen==="breakdown"          && <BreakdownScreen/>}
-        {screen==="progression"        && <ProgressionPage/>}
+        {screen==="game"               && <GameScreen/>}
       </div>
     </div>
   );
