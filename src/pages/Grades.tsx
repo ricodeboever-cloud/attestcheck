@@ -9,6 +9,7 @@ const Grades: React.FC = () => {
   const { 
     vakken, setVakken, 
     setReportImage, 
+    setReportMimeType,
     getApiKey, 
     setFbError, 
     setFbLoad 
@@ -34,55 +35,85 @@ Voorbeeld: [{"naam": "Wiskunde", "punt": "15.5", "maxPunt": "20"}]
 Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, enkel de JSON.`;
 
   const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    
+    // Copy files to an array to avoid any potential loss during re-renders
+    const files = Array.from(fileList);
     
     setOcrLoad(true);
     setFbError("");
+    
     try {
       const apiKey = getApiKey();
-      if (!apiKey) throw new Error("Geen API key.");
+      if (!apiKey) throw new Error("Geen API key gevonden. Configureer deze in de instellingen.");
       
       const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [{ text: OCR_PROMPT }];
       
+      let firstImageBase64 = "";
+      let firstImageMimeType = "";
+      
       for (let i = 0; i < files.length; i++) {
         const base64 = await toBase64(files[i]);
+        const cleanBase64 = base64.split(',')[1];
+        const mimeType = files[i].type || "image/jpeg";
+        
         parts.push({
           inlineData: {
-            mimeType: files[i].type,
-            data: base64.split(',')[1]
+            mimeType: mimeType,
+            data: cleanBase64
           }
         });
-        if (i === 0) setReportImage(base64.split(',')[1]);
+        
+        if (i === 0) {
+          firstImageBase64 = cleanBase64;
+          firstImageMimeType = mimeType;
+        }
       }
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: { parts },
-        config: { responseMimeType: "application/json" }
+        config: { 
+          responseMimeType: "application/json",
+          temperature: 0.1 // Lower temperature for more consistent OCR
+        }
       });
 
       const text = response.text;
-      const data = JSON.parse(text || "[]");
+      if (!text) throw new Error("De AI gaf geen antwoord terug. Probeer het opnieuw.");
       
-      if (data.length > 0) {
+      const data = JSON.parse(text);
+      
+      if (Array.isArray(data) && data.length > 0) {
         const newVakken = data.map((v: any) => ({
           id: Math.random().toString(36).substr(2, 9),
-          naam: v.naam,
-          punt: v.punt,
-          maxPunt: v.maxPunt || "100",
+          naam: v.naam || "Onbekend vak",
+          punt: v.punt ? String(v.punt) : "",
+          maxPunt: v.maxPunt ? String(v.maxPunt) : "100",
           isHoofdvak: false
         }));
+        
+        // Update all state at once at the end to minimize re-renders
         setVakken(newVakken);
+        if (firstImageBase64) {
+          setReportImage(firstImageBase64);
+          setReportMimeType(firstImageMimeType);
+        }
       } else {
-        setFbError("Geen vakken gevonden op de afbeelding. Probeer een duidelijkere foto.");
+        setFbError("Geen vakken herkend op de afbeelding. Probeer een duidelijkere foto van je rapport.");
       }
     } catch (err: any) {
-      console.error(err);
-      setFbError("Fout bij het lezen van het rapport: " + err.message);
+      console.error("OCR Error:", err);
+      setFbError("Fout bij het lezen van het rapport: " + (err.message || "Onbekende fout"));
+    } finally {
+      setOcrLoad(false);
+      // Clear the input value so the same file can be uploaded again if needed
+      if (e.target) {
+        e.target.value = "";
+      }
     }
-    setOcrLoad(false);
   };
 
   const toBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {

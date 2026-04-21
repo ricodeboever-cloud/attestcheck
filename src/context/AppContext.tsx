@@ -91,6 +91,8 @@ interface AppContextType {
   setFbError: (e: string) => void;
   reportImage: string | null;
   setReportImage: (i: string | null) => void;
+  reportMimeType: string | null;
+  setReportMimeType: (m: string | null) => void;
   progression: any[];
   setProgression: (p: any[]) => void;
   saveSuccess: boolean;
@@ -140,6 +142,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [fbLoad, setFbLoad] = useState(false);
   const [fbError, setFbError] = useState("");
   const [reportImage, setReportImage] = useState<string | null>(null);
+  const [reportMimeType, setReportMimeType] = useState<string | null>(null);
   const [progression, setProgression] = useState<any[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
@@ -233,7 +236,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       if (reportImage) {
         contents.push({
           inlineData: {
-            mimeType: "image/jpeg",
+            mimeType: reportMimeType || "image/jpeg",
             data: reportImage
           }
         });
@@ -442,6 +445,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       fbLoad, setFbLoad,
       fbError, setFbError,
       reportImage, setReportImage,
+      reportMimeType, setReportMimeType,
       progression, setProgression,
       saveSuccess, setSaveSuccess,
       hasApiKey, setHasApiKey,
