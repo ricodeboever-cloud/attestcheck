@@ -211,6 +211,14 @@ function AttestatieApp() {
   const [hasApiKey,     setHasApiKey]    = useState(true);
   const [showFeedback,  setShowFeedback] = useState(false);
   const [feedbackMsg,   setFeedbackMsg]  = useState("");
+  
+  // Grades Screen State (Elevated to prevent remount reset)
+  const [grades_lv, setGrades_lv] = useState<any[]>([]);
+  const [grades_nv, setGrades_nv] = useState("");
+  const [grades_ocrMsg, setGrades_ocrMsg] = useState("");
+  const [grades_ocrFout, setGrades_ocrFout] = useState("");
+  const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [feedbackRating, setFeedbackRating] = useState(0);
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
@@ -1089,23 +1097,23 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       { 
         icon: "📸", 
         color: "#3B82F6", 
-        label: "Punten Ingeven", 
-        desc: "Upload een foto van je rapport of vul je cijfers handmatig in.",
-        extra: "Onze AI herkent automatisch je vakken en scores."
+        label: "Punten Inladen", 
+        desc: "Upload een foto van je rapport. Onze AI herkent automatisch je scores.",
+        extra: "Snel, simpel en foutloos."
       },
       { 
-        icon: "✨", 
+        icon: "🧠", 
         color: "#A855F7", 
         label: "Slimme Analyse", 
-        desc: "De AI combineert je cijfers met je inzet en gedrag in de klas.",
-        extra: "Eerlijk en objectief inzicht in je huidige niveau."
+        desc: "We combineren je cijfers met je inzet en houding in de klas.",
+        extra: "Een eerlijk beeld van je voortgang."
       },
       { 
         icon: "🏆", 
         color: "#F59E0B", 
         label: "Attest Voorspelling", 
-        desc: "Zie direct of je op koers bent voor een A, B of C attest.",
-        extra: "Ontdek wat je nog moet doen om je doel te bereiken!"
+        desc: "Zie direct welk attest (A, B of C) je op dit moment zou halen.",
+        extra: "Ontdek wat je moet doen om te slagen!"
       }
     ];
 
@@ -1221,9 +1229,10 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         <div style={{marginBottom:12}}>
           <SmileyIcon size={80} />
         </div>
-        <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
-        <p style={{...S.sub,fontSize:18,marginBottom:40,lineHeight:1.6,fontWeight:800}}>
-          Krijg direct een voorspelling van jouw attest op basis van je huidige cijfers. 🎓
+        <h1 style={{fontSize:42,fontWeight:900,color:OR,margin:"0 0 10px",letterSpacing:"-1px"}}>RapportRadar</h1>
+        <p style={{...S.sub,fontSize:18,marginBottom:40,lineHeight:1.4,fontWeight:800,color:"#2D1B00"}}>
+          Welk attest haal jij? <br/>
+          <span style={{color:"#8B6242",fontSize:16,fontWeight:500}}>Krijg direct een slimme voorspelling van je schoolresultaten. 🎓</span>
         </p>
         <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
         <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
@@ -1520,13 +1529,25 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   };
 
   // ── 6. PUNTEN INVOEREN ─────────────────────────────────────
-  const GradesScreen = () => {
-    const [lv,      setLv]      = useState([...vakken]);
-    const [nv,      setNv]      = useState("");
-    const [ocrMsg,  setOcrMsg]  = useState("");
-    const [ocrFout, setOcrFout] = useState("");
-    const [ocrLoading, setOcrLoading] = useState(false);
-    const fileRef = useRef<HTMLInputElement>(null);
+  const renderGradesScreen = () => {
+    // Initialiseer elevated state bij eerste ingang
+    useEffect(() => {
+      if (grades_lv.length === 0 && vakken.length > 0) {
+        setGrades_lv([...vakken]);
+      }
+    }, []);
+
+    const lv = grades_lv;
+    const setLv = setGrades_lv;
+    const nv = grades_nv;
+    const setNv = setGrades_nv;
+    const ocrMsg = grades_ocrMsg;
+    const setOcrMsg = setGrades_ocrMsg;
+    const ocrFout = grades_ocrFout;
+    const setOcrFout = setGrades_ocrFout;
+    const ocrLoading = grades_ocrLoading;
+    const setOcrLoading = setGrades_ocrLoading;
+
     const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
 
     const voegToe = () => {
@@ -1537,11 +1558,20 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     const verwijder = (id: number) => setLv(lv.filter(v => v.id !== id));
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files || []);
-      if (!files.length) return;
+      const fileList = e.target.files;
+      if (!fileList || fileList.length === 0) return;
+      const files = Array.from(fileList);
+      
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
       try {
+        // PRE-CHECK API KEY om glitch te voorkomen (vooral in AI Studio)
+        const apiKey = getApiKey();
+        if (!apiKey && window.aistudio) {
+          console.log("Geen API key gevonden, open selectie...");
+          await window.aistudio.openSelectKey();
+        }
+
         // 1. Lees alle bestanden naar base64
         const imageParts = await Promise.all(files.map(async (file) => {
           return new Promise<any>((resolve, reject) => {
@@ -1555,24 +1585,14 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           });
         }));
 
-        if (imageParts.length > 0) {
-          setReportImage(imageParts[imageParts.length - 1].inlineData.data);
-        }
-
-        console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en) in één verzoek...`);
+        console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en)...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
         const response = await callGeminiWithFallback({
-          contents: [
-            {
-              parts: [
-                ...imageParts,
-                { text: OCR_PROMPT }
-              ]
-            }
-          ],
+          contents: [{ parts: [...imageParts, { text: OCR_PROMPT }] }],
           config: {
             responseMimeType: "application/json",
+            temperature: 0.1,
             responseSchema: {
               type: Type.ARRAY,
               items: {
@@ -1589,8 +1609,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         });
 
         const text = response.text;
-        console.log("OCR Raw Response:", text);
-        
         if (!text) {
           throw new Error("De AI gaf geen antwoord terug.");
         }
@@ -1603,7 +1621,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         }
         
         const merged = extracted.reduce((acc: any[], curr: any) => {
-          const existingIndex = acc.findIndex(a => a.naam.toLowerCase() === curr.naam.toLowerCase());
+          const existingIndex = acc.findIndex(a => a.naam.toLowerCase().trim() === curr.naam.toLowerCase().trim());
           if (existingIndex > -1) {
             acc[existingIndex] = curr;
           } else {
@@ -1615,8 +1633,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         setLv(prevLv => {
           const updated = prevLv.map(v => {
             const match = merged.find((e: any) =>
-              e.naam.toLowerCase().includes(v.naam.toLowerCase()) ||
-              v.naam.toLowerCase().includes(e.naam.toLowerCase())
+              e.naam.toLowerCase().trim().includes(v.naam.toLowerCase().trim()) ||
+              v.naam.toLowerCase().trim().includes(e.naam.toLowerCase().trim())
             );
             if (match) {
               const pStr = match.punt.replace(",", ".");
@@ -1636,7 +1654,13 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             });
           return [...updated, ...nieuw];
         });
-        setOcrMsg(`✅ ${merged.length} vakken en punten herkend uit ${files.length} foto's!`);
+
+        setOcrMsg(`✅ ${merged.length} vakken hersteld uit ${files.length} foto's!`);
+        
+        // Parent state pas aan het eind updaten om UI-stability te bewaren
+        if (imageParts.length > 0) {
+          setReportImage(imageParts[imageParts.length - 1].inlineData.data);
+        }
       } catch (error: any) {
         console.error("AI OCR Error (Grades):", error);
         let msg = "Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.";
@@ -3077,7 +3101,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         {screen==="register"           && <RegisterScreen/>}
         {screen==="login"              && <LoginScreen/>}
         {screen==="important_subjects" && <ImportantSubjectsScreen/>}
-        {screen==="grades"             && <GradesScreen/>}
+        {screen==="grades"             && renderGradesScreen()}
         {screen==="behavior"           && <BehaviorScreen/>}
         {screen==="results"            && <ResultsScreen/>}
         {screen==="breakdown"          && <BreakdownScreen/>}
