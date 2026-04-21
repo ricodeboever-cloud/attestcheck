@@ -1529,7 +1529,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   };
 
   // ── 6. PUNTEN INVOEREN ─────────────────────────────────────
-  const renderGradesScreen = () => {
+  const GradesScreen = () => {
     // Initialiseer elevated state bij eerste ingang
     useEffect(() => {
       if (grades_lv.length === 0 && vakken.length > 0) {
@@ -3101,7 +3101,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         {screen==="register"           && <RegisterScreen/>}
         {screen==="login"              && <LoginScreen/>}
         {screen==="important_subjects" && <ImportantSubjectsScreen/>}
-        {screen==="grades"             && renderGradesScreen()}
+        {screen==="grades"             && <GradesScreen />}
         {screen==="behavior"           && <BehaviorScreen/>}
         {screen==="results"            && <ResultsScreen/>}
         {screen==="breakdown"          && <BreakdownScreen/>}
