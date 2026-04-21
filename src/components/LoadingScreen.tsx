@@ -1,9 +1,13 @@
 import React from 'react';
 import { OR } from '../constants';
 
+import SmileyIcon from './SmileyIcon';
+
 const LoadingScreen: React.FC = () => (
   <div style={{textAlign:"center",paddingTop:80}}>
-    <div style={{fontSize:60,marginBottom:16}}>📊</div>
+    <div style={{marginBottom:16}}>
+      <SmileyIcon size={60} />
+    </div>
     <p style={{color:OR,fontWeight:800,fontSize:18}}>Laden...</p>
   </div>
 );

@@ -2,6 +2,8 @@ import React from 'react';
 import { useApp } from '../context/AppContext';
 import { S, OR, ORBG } from '../constants';
 
+import SmileyIcon from './SmileyIcon';
+
 const FeedbackModal: React.FC = () => {
   const { 
     showFeedback, setShowFeedback, 
@@ -26,7 +28,9 @@ const FeedbackModal: React.FC = () => {
 
         {feedbackSuccess ? (
           <div style={{textAlign:"center", padding:"20px 0"}}>
-            <div style={{fontSize:48, marginBottom:16}}>🚀</div>
+            <div style={{marginBottom:16}}>
+              <SmileyIcon size={64} />
+            </div>
             <h3 style={{...S.h2, color:"#15803D"}}>Bedankt!</h3>
             <p style={S.sub}>Je feedback is verzonden. We gaan ermee aan de slag!</p>
             <button style={{...S.btn, marginTop:24}} onClick={() => { setShowFeedback(false); setFeedbackSuccess(false); }}>Sluiten</button>
@@ -65,7 +69,7 @@ const FeedbackModal: React.FC = () => {
               onClick={submitFeedback}
               disabled={feedbackLoading || !feedbackMsg.trim()}
             >
-              {feedbackLoading ? "⏳ Verzenden..." : "Verzenden 🚀"}
+              {feedbackLoading ? "⏳ Verzenden..." : "Verzenden"} <SmileyIcon size={20} style={{marginLeft:8}} />
             </button>
           </>
         )}

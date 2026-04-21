@@ -8,7 +8,7 @@ export const CONFIG = {
   hoofdvakMultiplier: 3,
   puntenGewicht: 0.88,
   gedragGewicht: 0.12,
-  attestA_drempel: 65,
+  attestA_drempel: 70,
   attestB_drempel: 50,
   gedragsVragen: [
     { id: "stipt", vraag: "Ben je altijd op tijd in de les?", icon: "⏰" },

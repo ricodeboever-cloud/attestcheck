@@ -34,6 +34,7 @@ import {
 } from "recharts";
 import { OrbitControls, Float, Sparkles, Stars, Environment, PerspectiveCamera, MeshDistortMaterial, ContactShadows, PresentationControls, Float as FloatDrei } from "@react-three/drei";
 import * as THREE from "three";
+import SmileyIcon from "./components/SmileyIcon";
 
 declare global {
   interface Window {
@@ -1051,7 +1052,9 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
   // ── LAADSCHERM ─────────────────────────────────────────────
   const LoadingScreen = () => (
     <div style={{textAlign:"center",paddingTop:80}}>
-      <div style={{fontSize:60,marginBottom:16}}>📊</div>
+      <div style={{marginBottom:16}}>
+        <SmileyIcon size={60} />
+      </div>
       <p style={{color:OR,fontWeight:800,fontSize:18}}>Laden...</p>
     </div>
   );
@@ -1083,9 +1086,27 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     if (!showTutorial) return null;
     
     const steps = [
-      { icon: "📸", color: "#3B82F6", label: "Upload" },
-      { icon: "✨", color: "#A855F7", label: "Analyse" },
-      { icon: "🏆", color: "#F59E0B", label: "Resultaat" }
+      { 
+        icon: "📸", 
+        color: "#3B82F6", 
+        label: "Punten Ingeven", 
+        desc: "Upload een foto van je rapport of vul je cijfers handmatig in.",
+        extra: "Onze AI herkent automatisch je vakken en scores."
+      },
+      { 
+        icon: "✨", 
+        color: "#A855F7", 
+        label: "Slimme Analyse", 
+        desc: "De AI combineert je cijfers met je inzet en gedrag in de klas.",
+        extra: "Eerlijk en objectief inzicht in je huidige niveau."
+      },
+      { 
+        icon: "🏆", 
+        color: "#F59E0B", 
+        label: "Attest Voorspelling", 
+        desc: "Zie direct of je op koers bent voor een A, B of C attest.",
+        extra: "Ontdek wat je nog moet doen om je doel te bereiken!"
+      }
     ];
 
     return (
@@ -1113,32 +1134,44 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               style={{ padding: "20px 0" }}
             >
               <div style={{ 
-                fontSize: 120, marginBottom: 30, 
+                fontSize: 80, marginBottom: 20, 
                 filter: `drop-shadow(0 10px 20px ${steps[tutorialStep].color}44)` 
               }}>
                 {steps[tutorialStep].icon}
               </div>
+
+              <h3 style={{ fontSize: 22, fontWeight: 900, color: "#2D1B00", marginBottom: 12 }}>
+                {steps[tutorialStep].label}
+              </h3>
+              <p style={{ fontSize: 16, color: "#4B5563", fontWeight: 700, marginBottom: 8, lineHeight: 1.4 }}>
+                {steps[tutorialStep].desc}
+              </p>
+              <p style={{ fontSize: 13, color: "#8B6242", fontStyle: "italic", lineHeight: 1.5 }}>
+                {steps[tutorialStep].extra}
+              </p>
               
               {/* Visual indicators for what's happening */}
-              {tutorialStep === 0 && (
-                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-                  <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ fontSize: 32 }}>📄</motion.div>
-                  <div style={{ fontSize: 32 }}>➡️</div>
-                  <div style={{ fontSize: 32 }}>📱</div>
-                </div>
-              )}
-              {tutorialStep === 1 && (
-                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-                  <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 3, ease: "linear" }} style={{ fontSize: 32 }}>⚙️</motion.div>
-                  <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1 }} style={{ fontSize: 32 }}>🧠</motion.div>
-                </div>
-              )}
-              {tutorialStep === 2 && (
-                <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
-                  <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} style={{ fontSize: 32 }}>⭐</motion.div>
-                  <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.5 }} style={{ fontSize: 32 }}>📈</motion.div>
-                </div>
-              )}
+              <div style={{ marginTop: 24 }}>
+                {tutorialStep === 0 && (
+                  <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                    <motion.div animate={{ y: [0, -10, 0] }} transition={{ repeat: Infinity, duration: 1.5 }} style={{ fontSize: 32 }}>📄</motion.div>
+                    <div style={{ fontSize: 32 }}>➡️</div>
+                    <div style={{ fontSize: 32 }}>📱</div>
+                  </div>
+                )}
+                {tutorialStep === 1 && (
+                  <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 3, ease: "linear" }} style={{ fontSize: 32 }}>⚙️</motion.div>
+                    <motion.div animate={{ scale: [1, 1.2, 1] }} transition={{ repeat: Infinity, duration: 1 }} style={{ fontSize: 32 }}>🧠</motion.div>
+                  </div>
+                )}
+                {tutorialStep === 2 && (
+                  <div style={{ display: "flex", justifyContent: "center", gap: 10 }}>
+                    <motion.div animate={{ scale: [1, 1.3, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} style={{ fontSize: 32 }}>⭐</motion.div>
+                    <motion.div animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.5 }} style={{ fontSize: 32 }}>📈</motion.div>
+                  </div>
+                )}
+              </div>
             </motion.div>
           </AnimatePresence>
 
@@ -1185,10 +1218,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
     return (
       <div style={{textAlign:"center",paddingTop:60}}>
-        <div style={{fontSize:76,marginBottom:12}}>📊</div>
+        <div style={{marginBottom:12}}>
+          <SmileyIcon size={80} />
+        </div>
         <h1 style={{fontSize:38,fontWeight:900,color:OR,margin:"0 0 6px"}}>RapportRadar</h1>
-        <p style={{...S.sub,fontSize:16,marginBottom:40,lineHeight:1.7}}>
-          Ontdek welk attest je op dit moment zou krijgen! 🎓
+        <p style={{...S.sub,fontSize:18,marginBottom:40,lineHeight:1.6,fontWeight:800}}>
+          Krijg direct een voorspelling van jouw attest op basis van je huidige cijfers. 🎓
         </p>
         <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
         <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
@@ -1223,10 +1258,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div style={{paddingTop:10}}>
         <div style={{...S.card, textAlign:"center", padding:30}}>
-          <div style={{fontSize:64, marginBottom:16}}>🚀</div>
+          <div style={{marginBottom:16}}>
+            <SmileyIcon size={80} />
+          </div>
           <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
-          <p style={{...S.sub, fontSize:15, marginBottom:24}}>
-            Klaar om je rapport te checken? Je gegevens staan alvast klaar.
+          <p style={{...S.sub, fontSize:16, marginBottom:24, fontWeight: 700, color: ORD}}>
+            Klaar om te ontdekken welk attest je dit jaar kunt verwachten? 🎓
           </p>
           
           <div style={{background:ORBG, borderRadius:16, padding:18, marginBottom:24, textAlign:"left", border:`1px solid ${ORPL}`}}>
@@ -1239,7 +1276,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           </div>
 
           <button style={S.btn} onClick={startNieuweAnalyse}>
-            Start Nieuwe Analyse 📊
+            Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
           </button>
 
           <button 
@@ -1845,15 +1882,15 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     }, [score]);
 
     const Speedo = ({val}: { val: number }) => {
-      const color = val >= 70 ? "#22C55E" : val >= 50 ? "#F59E0B" : "#EF4444";
+      const color = val >= CONFIG.attestA_drempel ? "#22C55E" : val >= CONFIG.attestB_drempel ? "#F59E0B" : "#EF4444";
       const isGod = val >= 96;
       
       return (
         <div style={{ marginBottom: 24, padding: "0 10px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, fontWeight: 900, color: isGod ? "#F59E0B" : "#8B6242", textTransform: "uppercase", marginBottom: 6, letterSpacing: 1 }}>
-            <span>C-Attest</span>
-            <span>B-Attest</span>
-            <span>A-Attest</span>
+          <div style={{ position: "relative", height: 16, marginBottom: 6 }}>
+            <span style={{ position: "absolute", left: `${CONFIG.attestB_drempel / 2}%`, transform: "translateX(-50%)", fontSize: 9, fontWeight: 900, color: "#8B6242", textTransform: "uppercase" }}>C-Attest</span>
+            <span style={{ position: "absolute", left: `${(CONFIG.attestB_drempel + CONFIG.attestA_drempel) / 2}%`, transform: "translateX(-50%)", fontSize: 9, fontWeight: 900, color: "#8B6242", textTransform: "uppercase" }}>B-Attest</span>
+            <span style={{ position: "absolute", left: `${(CONFIG.attestA_drempel + 100) / 2}%`, transform: "translateX(-50%)", fontSize: 9, fontWeight: 900, color: "#8B6242", textTransform: "uppercase" }}>A-Attest</span>
           </div>
           <div style={{ 
             height: 12, 
@@ -1864,8 +1901,9 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             boxShadow: "inset 0 2px 4px rgba(0,0,0,0.1)",
             border: isGod ? "2px solid #FFD700" : "none"
           }}>
-            <div style={{ position: "absolute", left: "33.3%", top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.5)", zIndex: 1 }} />
-            <div style={{ position: "absolute", left: "66.6%", top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.5)", zIndex: 1 }} />
+            {/* Markers at thresholds */}
+            <div style={{ position: "absolute", left: `${CONFIG.attestB_drempel}%`, top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.6)", zIndex: 1 }} />
+            <div style={{ position: "absolute", left: `${CONFIG.attestA_drempel}%`, top: 0, bottom: 0, width: 2, background: "rgba(255,255,255,0.6)", zIndex: 1 }} />
             <motion.div 
               initial={{ width: 0 }}
               animate={{ width: `${val}%` }}
@@ -1891,8 +1929,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       const getMascotState = (p: number) => {
         if (p < 10) return { label: "Totaal verslagen...", color: "#4B5563", mood: "angry", body: "#4B5563", belly: "#374151", god: false };
         if (p < 30) return { label: "Zwaar gewond!", color: "#EF4444", mood: "angry", body: "#EF4444", belly: "#FEE2E2", god: false };
-        if (p < 50) return { label: "De weg is lang...", color: "#F59E0B", mood: "sad", body: "#F59E0B", belly: "#FEF3C7", god: false };
-        if (p < 70) return { label: "Klaar voor de strijd", color: "#10B981", mood: "neutral", body: "#10B981", belly: "#D1FAE5", god: false };
+        if (p < CONFIG.attestB_drempel) return { label: "De weg is lang...", color: "#F59E0B", mood: "sad", body: "#F59E0B", belly: "#FEF3C7", god: false };
+        if (p < CONFIG.attestA_drempel) return { label: "Klaar voor de strijd", color: "#10B981", mood: "neutral", body: "#10B981", belly: "#D1FAE5", god: false };
         if (p < 85) return { label: "Echte heldenkracht!", color: "#3B82F6", mood: "happy", body: "#3B82F6", belly: "#DBEAFE", god: false };
         if (p < 96) return { label: "Legendarische status", color: "#8B5CF6", mood: "happy", body: "#8B5CF6", belly: "#EDE9FE", god: false };
         return { label: "GOD MODUS BEREIKT", color: "#F59E0B", mood: "god", body: "#FFD700", belly: "#FFF7ED", god: true };
@@ -2994,7 +3032,9 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       <div style={S.wrap} key={screen} className="animate-in">
         {!geenHeader.includes(screen) && currentUser && (
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
-            <div style={{fontWeight:900,color:OR,fontSize:16}}>📊 RapportRadar</div>
+            <div style={{fontWeight:900,color:OR,fontSize:16,display:"flex",alignItems:"center",gap:6}}>
+              <SmileyIcon size={24} /> RapportRadar
+            </div>
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
               <button 
                 onClick={() => setShowSettings(true)}

@@ -34,8 +34,8 @@ const Results: React.FC = () => {
 
   const Speedo = ({ val }: { val: number }) => {
     const getSpeedoState = (v: number) => {
-      if (v >= 70) return { label: "UITSTEKEND", color: "#22C55E", bg: "#F0FDF4" };
-      if (v >= 50) return { label: "VOLDOENDE", color: "#F59E0B", bg: "#FFFBEB" };
+      if (v >= CONFIG.attestA_drempel) return { label: "UITSTEKEND", color: "#22C55E", bg: "#F0FDF4" };
+      if (v >= CONFIG.attestB_drempel) return { label: "VOLDOENDE", color: "#F59E0B", bg: "#FFFBEB" };
       return { label: "OPGEPAST", color: "#EF4444", bg: "#FEF2F2" };
     };
 

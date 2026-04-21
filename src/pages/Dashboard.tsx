@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { OR, ORBG, ORPL, ORD, S, getRankInfo } from '../constants';
 
+import SmileyIcon from '../components/SmileyIcon';
+
 const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const { 
@@ -86,10 +88,12 @@ const Dashboard: React.FC = () => {
       )}
 
       <div style={{...S.card, textAlign:"center", padding:30}}>
-        <div style={{fontSize:64, marginBottom:16}}>🚀</div>
+        <div style={{marginBottom:16}}>
+          <SmileyIcon size={80} />
+        </div>
         <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
-        <p style={{...S.sub, fontSize:15, marginBottom:24}}>
-          Klaar om je rapport te checken? Je gegevens staan alvast klaar.
+        <p style={{...S.sub, fontSize:16, marginBottom:24, fontWeight: 700, color: ORD}}>
+          Krijg direct inzicht in jouw verwachte attest! 🎓
         </p>
         
         <div style={{background:ORBG, borderRadius:16, padding:18, marginBottom:24, textAlign:"left", border:`1px solid ${ORPL}`}}>
@@ -102,7 +106,7 @@ const Dashboard: React.FC = () => {
         </div>
 
         <button style={S.btn} onClick={startNieuweAnalyse}>
-          Start Nieuwe Analyse 📊
+          Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
         </button>
 
         <button style={S.btn} onClick={() => navigate("/progression")}>
