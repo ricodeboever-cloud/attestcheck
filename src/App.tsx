@@ -35,6 +35,10 @@ import {
 import { OrbitControls, Float, Sparkles, Stars, Environment, PerspectiveCamera, MeshDistortMaterial, ContactShadows, PresentationControls, Float as FloatDrei } from "@react-three/drei";
 import * as THREE from "three";
 import SmileyIcon from "./components/SmileyIcon";
+import FeedbackModal from "./components/FeedbackModal";
+import SettingsModal from "./components/SettingsModal";
+import ProfileCard from "./components/ProfileCard";
+import { useApp } from "./context/AppContext";
 
 declare global {
   interface Window {
@@ -222,6 +226,7 @@ const ORBG = "#FFF5EC";
 const ORPL = "#FFE4C4";
 
 function AttestatieApp() {
+  const { setShowFeedback, setShowSettings, setShowProfile } = useApp();
   const [screen,        setScreen]       = useState("loading");
   const [currentUser,   setCurrentUser]  = useState<any>(null);
   const [school,        setSchool]       = useState("");
@@ -246,7 +251,6 @@ function AttestatieApp() {
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [showSettings,   setShowSettings]  = useState(false);
   const [progression,    setProgression]   = useState<any[]>([]);
   const [progressionLoading, setProgressionLoading] = useState(false);
   const [saveSuccess,    setSaveSuccess]   = useState(false);
@@ -2834,190 +2838,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
-  const [showProfile, setShowProfile] = useState(false);
-
-  const ProfileCard = () => {
-    if (!currentUser || !showProfile) return null;
-    const xp = currentUser.xp || 0;
-    const rank = getRankInfo(xp);
-    const nextRank = RANKS.find(r => r.min > xp);
-    const progress = nextRank ? ((xp - rank.min) / (nextRank.min - rank.min)) * 100 : 100;
-
-    return (
-      <div style={{
-        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1200,
-        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
-        backdropFilter:"blur(6px)"
-      }} onClick={() => setShowProfile(false)}>
-        <motion.div 
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          style={{...S.card, width:"100%", maxWidth:400, position:"relative", textAlign: "center"}}
-          onClick={e => e.stopPropagation()}
-        >
-          <button 
-            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
-            onClick={() => setShowProfile(false)}
-          >✕</button>
-
-          <div style={{ fontSize: 64, marginBottom: 16 }}>{rank.name.split(' ')[1]}</div>
-          <h2 style={S.h2}>{currentUser.naam}</h2>
-          <p style={{...S.sub, fontWeight: 800, color: rank.color, fontSize: 16, marginBottom: 20 }}>
-            {rank.name}
-          </p>
-
-          <div style={{ background: ORBG, borderRadius: 20, padding: 20, marginBottom: 20 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14, fontWeight: 800 }}>
-              <span>XP Voortgang</span>
-              <span>{xp} XP</span>
-            </div>
-            <div style={{ width: "100%", height: 12, background: ORPL, borderRadius: 10, overflow: "hidden" }}>
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                style={{ height: "100%", background: `linear-gradient(90deg, ${OR}, ${ORL})` }}
-              />
-            </div>
-            {nextRank && (
-              <p style={{ fontSize: 11, color: "#8B6242", marginTop: 8, fontWeight: 700 }}>
-                Nog {nextRank.min - xp} XP tot {nextRank.name}
-              </p>
-            )}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
-            <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
-              <div style={{ fontSize: 20, marginBottom: 4 }}>📈</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Metingen</div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>{progression.length}</div>
-            </div>
-            <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
-              <div style={{ fontSize: 20, marginBottom: 4 }}>🎯</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Focus Doelen</div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>
-                {currentUser.focusPoints?.filter((p: any) => p.completed).length || 0}
-              </div>
-            </div>
-          </div>
-
-          <button 
-            style={{ ...S.btn, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
-            onClick={() => {
-              setScreen("game");
-              setShowProfile(false);
-            }}
-          >
-            Bekijk Volledige Progressie 🎮
-          </button>
-        </motion.div>
-      </div>
-    );
-  };
-
-  // ── 12. INSTELLINGEN MODAL ──────────────────────────────────
-  const SettingsModal = () => {
-    const [ls, setLs] = useState(school);
-    const [lj, setLj] = useState(jaar);
-    const [ll, setLl] = useState(leeftijd);
-    const [lr, setLr] = useState(richting);
-    const [ln, setLn] = useState(currentUser?.naam || "");
-    const [bezig, setBezig] = useState(false);
-    const [success, setSuccess] = useState(false);
-
-    if (!showSettings) return null;
-
-    const opslaan = async () => {
-      setBezig(true);
-      try {
-        if (currentUser?.uid) {
-          await setDoc(doc(db, "users", currentUser.uid), {
-            ...currentUser,
-            naam: ln,
-            school: ls,
-            jaar: lj,
-            leeftijd: ll,
-            richting: lr
-          });
-          setSchool(ls); setJaar(lj); setLeeftijd(ll); setRichting(lr);
-          setCurrentUser({ ...currentUser, naam: ln, school: ls, jaar: lj, leeftijd: ll, richting: lr });
-          setSuccess(true);
-          setTimeout(() => {
-            setSuccess(false);
-            setShowSettings(false);
-          }, 1500);
-        }
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, `users/${currentUser?.uid}`);
-      } finally {
-        setBezig(false);
-      }
-    };
-
-    return (
-      <div style={{
-        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1100,
-        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
-        backdropFilter:"blur(4px)"
-      }}>
-        <div style={{...S.card, width:"100%", maxWidth:450, position:"relative", animation:"bounce .3s ease"}}>
-          <button 
-            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
-            onClick={() => setShowSettings(false)}
-          >✕</button>
-          
-          <div style={{textAlign:"center", marginBottom:20}}>
-            <div style={{fontSize:40, marginBottom:8}}>⚙️</div>
-            <h2 style={S.h2}>Mijn Instellingen</h2>
-            <p style={S.sub}>Pas hier je profielgegevens aan.</p>
-          </div>
-
-          {success ? (
-            <div style={{...S.ok, textAlign:"center", padding:20}}>
-              <div style={{fontSize:30, marginBottom:10}}>✅</div>
-              Gegevens succesvol bijgewerkt!
-            </div>
-          ) : (
-            <div style={{maxHeight:"70vh", overflowY:"auto", paddingRight:10}}>
-              <label style={S.lbl}>Voornaam</label>
-              <input style={S.input} value={ln} onChange={e=>setLn(e.target.value)} placeholder="Jouw voornaam"/>
-
-              <label style={S.lbl}>🏫 School</label>
-              <input style={S.input} value={ls} onChange={e=>setLs(e.target.value)} placeholder="Naam van je school"/>
-
-              <div style={{display:"grid", gridTemplateColumns:"1fr 1fr", gap:10}}>
-                <div>
-                  <label style={S.lbl}>📅 Jaar / Graad</label>
-                  <select style={{...S.input}} value={lj} onChange={e=>setLj(e.target.value)}>
-                    <option value="">Kies jaar...</option>
-                    {["1ste leerjaar","2de leerjaar","3de leerjaar","4de leerjaar","5de leerjaar","6de leerjaar",
-                      "1ste middelbaar","2de middelbaar","3de middelbaar","4de middelbaar","5de middelbaar","6de middelbaar"].map(j=>(
-                      <option key={j} value={j}>{j}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label style={S.lbl}>🎂 Leeftijd</label>
-                  <input style={S.input} type="number" value={ll} onChange={e=>setLl(e.target.value)} placeholder="Bv. 14"/>
-                </div>
-              </div>
-
-              <label style={S.lbl}>🚀 Studierichting</label>
-              <input style={S.input} value={lr} onChange={e=>setLr(e.target.value)} placeholder="Bv. Economie-Wiskunde"/>
-
-              <button 
-                style={{...S.btn, marginTop:10}} 
-                onClick={opslaan}
-                disabled={bezig}
-              >
-                {bezig ? "⏳ Opslaan..." : "Opslaan ✅"}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   // ════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════
@@ -3095,6 +2915,74 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         {screen==="breakdown"          && <BreakdownScreen/>}
         {screen==="game"               && <GameScreen/>}
       </div>
+
+      <FeedbackModal />
+      <SettingsModal />
+      <ProfileCard />
+      <BadgeNotification />
+
+      {/* Subtle floating feedback button */}
+      {currentUser && (
+        <motion.div
+          initial="initial"
+          whileHover="hover"
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 1000,
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            cursor: "pointer"
+          }}
+          onClick={() => setShowFeedback(true)}
+        >
+          <motion.div
+            variants={{
+              initial: { opacity: 0, x: 10, scale: 0.8 },
+              hover: { opacity: 1, x: 0, scale: 1 }
+            }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+            style={{
+              background: "white",
+              padding: "6px 14px",
+              borderRadius: 14,
+              fontSize: 13,
+              fontWeight: 900,
+              color: OR,
+              boxShadow: "0 4px 15px rgba(0,0,0,0.1)",
+              border: `1.5px solid ${ORPL}`,
+              whiteSpace: "nowrap"
+            }}
+          >
+            Feedback geven?
+          </motion.div>
+          <motion.button
+            variants={{
+              initial: { scale: 1 },
+              hover: { scale: 1.1, rotate: 5 }
+            }}
+            whileTap={{ scale: 0.9 }}
+            style={{
+              width: 54,
+              height: 54,
+              borderRadius: "50%",
+              background: `linear-gradient(135deg, ${OR}, ${ORL})`,
+              color: "white",
+              border: "none",
+              fontSize: 26,
+              cursor: "pointer",
+              boxShadow: `0 8px 24px ${OR}44`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            💡
+          </motion.button>
+        </motion.div>
+      )}
     </div>
   );
 }
