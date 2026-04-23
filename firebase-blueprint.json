@@ -106,6 +106,20 @@
         "timestamp": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "score", "date", "timestamp"]
+    },
+    "Feedback": {
+      "title": "Feedback",
+      "description": "User feedback and ratings",
+      "type": "object",
+      "properties": {
+        "rating": { "type": "number", "description": "Rating from 1-5" },
+        "message": { "type": "string" },
+        "context": { "type": "object" },
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["message", "userId", "timestamp"]
     }
   },
   "firestore": {
@@ -116,6 +130,10 @@
     "/users/{userId}/progression/{date}": {
       "schema": "Progression",
       "description": "Daily progression records"
+    },
+    "/feedback/{feedbackId}": {
+      "schema": "Feedback",
+      "description": "Global user feedback collection"
     }
   }
 }

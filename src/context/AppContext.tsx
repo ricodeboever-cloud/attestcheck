@@ -121,7 +121,11 @@ interface AppContextType {
   saveTodayScore: () => Promise<void>;
   logout: () => Promise<void>;
   checkApiKey: () => Promise<void>;
+  generateNewFocusPoint?: (updatedUser: any) => Promise<void>;
   getApiKey: () => string;
+  isDemo: boolean;
+  setIsDemo: (d: boolean) => void;
+  startDemo: () => void;
   loading: boolean;
 }
 
@@ -154,6 +158,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [feedbackMsg, setFeedbackMsg] = useState("");
   const [feedbackLoading, setFeedbackLoading] = useState(false);
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
+
+  const [isDemo, setIsDemo] = useState(false);
+  const today = new Date().toISOString().split('T')[0];
+
+  const startDemo = () => {
+    setIsDemo(true);
+    setCurrentUser({
+      uid: "demo_user",
+      naam: "Demo Student",
+      email: "demo@rapportradar.be",
+      school: "De Toekomst School",
+      jaar: "4de middelbaar",
+      leeftijd: "15",
+      richting: "Wetenschappen",
+      xp: 1250,
+      rank: getRankInfo(1250).name,
+      focusPoints: [
+        { id: "fp_1", text: "Franse woordjes oefenen (Unit 4)", completed: false, xpValue: 20, createdAt: new Date().toISOString() },
+        { id: "fp_2", text: "Wiskunde oefeningen over functies maken", completed: true, xpValue: 20, createdAt: new Date().toISOString() },
+        { id: "fp_3", text: "Vroeger beginnen met studeren", completed: false, xpValue: 20, createdAt: new Date().toISOString() }
+      ]
+    });
+    setVakken([
+      { id: "1", naam: "Wiskunde", punt: "68", maxPunt: "100", isHoofdvak: true },
+      { id: "2", naam: "Nederlands", punt: "75", maxPunt: "100", isHoofdvak: true },
+      { id: "3", naam: "Frans", punt: "52", maxPunt: "100", isHoofdvak: false },
+      { id: "4", naam: "Geschiedenis", punt: "82", maxPunt: "100", isHoofdvak: false }
+    ]);
+    setGedragAntw({ "1": 4, "2": 3, "3": 5, "4": 4, "5": 5, "6": 4 });
+    setNederlandsAntw({ "schrijven": "ja", "spreken": "ja" });
+    setScore(72.5);
+    setProgression([
+      { date: "2024-03-01", score: 65 },
+      { date: "2024-03-15", score: 68 },
+      { date: today, score: 72.5 }
+    ]);
+  };
 
   const submitFeedback = async () => {
     if (!feedbackMsg.trim()) return;
@@ -343,7 +384,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
   };
 
   const saveTodayScore = async () => {
-    if (!currentUser || score === null) return;
+    if (!currentUser || score === null || isDemo) return;
     const today = new Date().toISOString().split('T')[0];
     const newEntry = { date: today, score };
     const updatedProgression = [...progression, newEntry];
@@ -462,6 +503,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       vraagFeedback,
       saveTodayScore,
       logout, checkApiKey, getApiKey,
+      isDemo, setIsDemo, startDemo,
       loading
     }}>
       {children}

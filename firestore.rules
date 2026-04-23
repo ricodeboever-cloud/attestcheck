@@ -1,77 +1,63 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - naam: string (required) - User's first name
-    //   - email: string (required, email format) - User's email address
-    //
-    // Collection: users/{userId}/progression
-    // Document ID: {date} (YYYY-MM-DD)
-    // Fields:
-    //   - userId: string (required)
-    //   - score: number (required)
-    //   - date: string (required, YYYY-MM-DD)
-    //   - timestamp: timestamp (required)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
+    // ═══════════════════════════════════════════════════════════════════════
+    // 🔒 HELPERS
+    // ═══════════════════════════════════════════════════════════════════════
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
     
-    function isAuthenticated() {
-      return request.auth != null;
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    // Domain Validators
+    // ═══════════════════════════════════════════════════════════════════════
+    // 👤 USERS
+    // ═══════════════════════════════════════════════════════════════════════
     function isValidUser(data) {
-      return data.keys().hasOnly(['naam', 'email', 'school', 'jaar', 'leeftijd', 'richting', 'vakken', 'gedragAntw', 'nederlandsAntw', 'score']) &&
-             data.naam is string && data.naam.size() > 0 && data.naam.size() < 100 &&
-             data.email is string && isValidEmail(data.email) &&
-             (!('school' in data) || data.school is string) &&
-             (!('jaar' in data) || data.jaar is string) &&
-             (!('leeftijd' in data) || data.leeftijd is string) &&
-             (!('richting' in data) || data.richting is string) &&
-             (!('vakken' in data) || data.vakken is list) &&
-             (!('gedragAntw' in data) || data.gedragAntw is map) &&
-             (!('nederlandsAntw' in data) || data.nederlandsAntw is map) &&
-             (!('score' in data) || data.score is number);
-    }
-
-    function isValidProgression(data) {
-      return data.keys().hasOnly(['userId', 'score', 'date', 'timestamp']) &&
-             data.userId is string &&
-             data.score is number &&
-             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
-             data.timestamp is timestamp;
+      return data.naam is string && data.naam.size() <= 100 &&
+             data.email is string && data.email.size() <= 150 &&
+             (!('xp' in data) || data.xp is number) &&
+             (!('rank' in data) || data.rank is string) &&
+             (!('focusPoints' in data) || data.focusPoints is list);
     }
 
     match /users/{userId} {
       allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming());
       allow delete: if isOwner(userId);
+
+      // Subcollection for progression tracking
+      match /progression/{date} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && 
+                      incoming().score is number && 
+                      incoming().date is string &&
+                      incoming().timestamp is timestamp;
+        allow update: if isOwner(userId);
+        allow delete: if isOwner(userId);
+      }
     }
 
-    match /users/{userId}/progression/{date} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidProgression(request.resource.data);
-      allow update: if isOwner(userId) && isValidProgression(request.resource.data);
-      allow delete: if isOwner(userId);
+    // ═══════════════════════════════════════════════════════════════════════
+    // 💡 FEEDBACK
+    // ═══════════════════════════════════════════════════════════════════════
+    function isValidFeedback(data) {
+      return data.message is string && data.message.size() <= 2000 &&
+             data.userId == request.auth.uid &&
+             (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5)) &&
+             data.timestamp == request.time;
+    }
+
+    match /feedback/{feedbackId} {
+      allow create: if isSignedIn() && isValidFeedback(incoming());
+      // Admins (hypothetical) would need a different rule, for now users just submit.
+      allow read, update, delete: if false;
     }
   }
 }

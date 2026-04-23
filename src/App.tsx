@@ -226,7 +226,8 @@ const ORBG = "#FFF5EC";
 const ORPL = "#FFE4C4";
 
 function AttestatieApp() {
-  const { setShowFeedback, setShowSettings, setShowProfile } = useApp();
+  const { setShowFeedback, setShowSettings, setShowProfile, isDemo, setIsDemo, startDemo } = useApp();
+  const [showPrivacy, setShowPrivacy] = useState(false);
   const [screen,        setScreen]       = useState("loading");
   const [currentUser,   setCurrentUser]  = useState<any>(null);
   const [school,        setSchool]       = useState("");
@@ -256,7 +257,25 @@ function AttestatieApp() {
   const [saveSuccess,    setSaveSuccess]   = useState(false);
   const [newBadge,       setNewBadge]      = useState<any>(null);
 
-  // ── 9. PROGRESSIE LOGICA ──────────────────────────────
+  // ── PRIVACY MODAL ──────────────────────────────────────────
+  const PrivacyModal = () => {
+    if (!showPrivacy) return null;
+    return (
+      <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:4000,display:"flex",alignItems:"center",justifyContent:"center",padding:20,backdropFilter:"blur(8px)"}}>
+        <motion.div initial={{scale:0.9,opacity:0}} animate={{scale:1,opacity:1}} style={{...S.card, width:"100%", maxWidth:500, maxHeight:"80vh", overflowY:"auto", position:"relative"}}>
+          <button style={{position:"absolute",top:16,right:16,background:"none",border:"none",fontSize:24,cursor:"pointer"}} onClick={()=>setShowPrivacy(false)}>✕</button>
+          <h2 style={S.h2}>Privacy & Voorwaarden</h2>
+          <div style={{textAlign:"left", fontSize:14, lineHeight:1.6, color:"#475569"}}>
+            <p><strong>1. Data Veiligheid</strong><br/>Je data wordt veilig opgeslagen in Google Firebase. Wij verkopen je data nooit aan derden.</p>
+            <p><strong>2. Eigendom</strong><br/>Jij blijft eigenaar van je ingevulde punten. Je kunt je account op elk moment laten verwijderen via de instellingen.</p>
+            <p><strong>3. Geen Rechten</strong><br/>De voorspellingen van RapportRadar zijn gebaseerd op algoritmes en AI. Hieraan kunnen geen rechten worden ontleend bij je school.</p>
+            <p><strong>4. Gebruik</strong><br/>Deze app is bedoeld als motivatie-tool voor leerlingen.</p>
+          </div>
+          <button style={{...S.btn, marginTop:20}} onClick={()=>setShowPrivacy(false)}>Ik begrijp het</button>
+        </motion.div>
+      </div>
+    );
+  };
   const generateNewFocusPoint = async (updatedUser: any) => {
     try {
       const apiKey = getApiKey();
@@ -1125,27 +1144,38 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
   };
 
   // ── DISCLAIMER ──────────────────────────────────────────────
-  const Disclaimer = ({ mini = false }: { mini?: boolean }) => (
-    <div style={{
-      marginTop: mini ? 15 : 24,
-      padding: mini ? "10px 14px" : "18px 22px",
-      background: "rgba(255, 255, 255, 0.6)",
-      border: `1.5px solid ${ORPL}`,
-      borderRadius: 20,
-      fontSize: mini ? 11 : 13,
-      color: "#64748B",
-      textAlign: "center",
-      lineHeight: 1.5,
-      backdropFilter: "blur(5px)"
-    }}>
-      <div style={{ fontWeight: 900, marginBottom: 5, color: ORD, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: mini ? 12 : 14 }}>
-        <span>⚠️</span> Belangrijk: Geen garantie
+  const Disclaimer = ({ mini = false }: { mini?: boolean }) => {
+    const { setShowPrivacy } = useApp() as any;
+    return (
+      <div style={{
+        marginTop: mini ? 15 : 24,
+        padding: mini ? "10px 14px" : "18px 22px",
+        background: "rgba(255, 255, 255, 0.6)",
+        border: `1.5px solid ${ORPL}`,
+        borderRadius: 20,
+        fontSize: mini ? 11 : 13,
+        color: "#64748B",
+        textAlign: "center",
+        lineHeight: 1.5,
+        backdropFilter: "blur(5px)"
+      }} className="no-print">
+        <div style={{ fontWeight: 900, marginBottom: 5, color: ORD, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: mini ? 12 : 14 }}>
+          <span>⚠️</span> Belangrijk: Geen garantie
+        </div>
+        RapportRadar is <strong>niet verbonden aan een officiële school</strong>. 
+        Deze voorspelling is <strong>slechts een indicatie</strong>. 
+        De echte beslissing wordt genomen door de <strong>klassenraad</strong>.
+        <div style={{marginTop: 8}}>
+          <button 
+            onClick={() => setShowPrivacy(true)}
+            style={{background: "none", border: "none", color: OR, textDecoration: "underline", fontSize: 11, cursor: "pointer", fontWeight: 700}}
+          >
+            Privacy & Voorwaarden 📄
+          </button>
+        </div>
       </div>
-      RapportRadar is <strong>niet verbonden aan een officiële school</strong>. 
-      Deze voorspelling is <strong>slechts een indicatie</strong>. 
-      De echte beslissing over je attest wordt altijd genomen door de <strong>klassenraad</strong> van jouw school.
-    </div>
-  );
+    );
+  };
 
   // ── LAADSCHERM ─────────────────────────────────────────────
   const LoadingScreen = () => (
@@ -1306,14 +1336,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   };
 
   const WelcomeScreen = () => {
-    useEffect(() => {
-      const hasSeen = sessionStorage.getItem("hasSeenTutorial");
-      if (!hasSeen) {
-        setShowTutorial(true);
-        sessionStorage.setItem("hasSeenTutorial", "true");
-      }
-    }, []);
-
     return (
       <div style={{textAlign:"center",paddingTop:60}}>
         <div style={{marginBottom:12}}>
@@ -1326,15 +1348,28 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         </p>
         <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
         <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
-        <button 
-          style={{...S.btnSec, marginTop: 20, border: "none", background: "transparent", color: OR, textDecoration: "underline"}} 
-          onClick={() => {
-            setTutorialStep(0);
-            setShowTutorial(true);
-          }}
-        >
-          Hoe werkt het? ❓
-        </button>
+        
+        <div style={{marginTop: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "center"}}>
+          <button 
+            style={{...S.btnSec, border: `2px dashed ${OR}`, background: `${OR}08`}} 
+            onClick={() => {
+              startDemo();
+              setScreen("dashboard");
+            }}
+          >
+            🚀 Bekijk de Demo (Direct proberen)
+          </button>
+          
+          <button 
+            style={{background: "transparent", border: "none", color: "#8B6242", textDecoration: "underline", fontSize: 13, cursor: "pointer"}} 
+            onClick={() => {
+              setTutorialStep(0);
+              setShowTutorial(true);
+            }}
+          >
+            Hoe werkt het precies? ❓
+          </button>
+        </div>
         <Disclaimer />
       </div>
     );
@@ -1841,9 +1876,21 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                 {v.isHoofdvak&&<span>⭐</span>}{v.naam}
               </div>
               <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 4px",fontSize:16}}
-                type="number" value={v.punt} onChange={e=>updateVak(v.id,"punt",e.target.value)} placeholder="0" min="0"/>
+                type="number" value={v.punt} 
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && (val < 0 || val > parseFloat(v.maxPunt) * 1.5)) return;
+                  updateVak(v.id, "punt", e.target.value);
+                }} 
+                placeholder="0" min="0" max={v.maxPunt}/>
               <input style={{...S.input,margin:0,textAlign:"center",padding:"10px 4px",fontSize:13,color:"#8B6242"}}
-                type="number" value={v.maxPunt} onChange={e=>updateVak(v.id,"maxPunt",e.target.value)} placeholder="20" min="1"/>
+                type="number" value={v.maxPunt} 
+                onChange={e => {
+                  const val = parseFloat(e.target.value);
+                  if (!isNaN(val) && val <= 0) return;
+                  updateVak(v.id, "maxPunt", e.target.value);
+                }}
+                placeholder="20" min="1" max="1000"/>
               <button onClick={()=>verwijder(v.id)} style={{
                 background:"#FEE2E2",color:"#EF4444",border:"none",borderRadius:8,
                 height:"100%",cursor:"pointer",fontWeight:700,fontSize:14,
@@ -2182,13 +2229,23 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div>
         <StapBar huidig="results"/>
-        <div style={S.card}>
+        <div style={S.card} className="print-area">
           <div style={{textAlign:"center",marginBottom:16}}>
             <h2 style={S.h2}>Jouw Resultaat</h2>
+            <p className="no-print" style={S.sub}>Analyse van {new Date().toLocaleDateString()}</p>
           </div>
           
           <Speedo val={anim}/>
-          <CharacterAnimation val={anim}/>
+          <div className="no-print">
+            <CharacterAnimation val={anim}/>
+          </div>
+
+          <div style={{display: "none"}} className="print-only">
+             <div style={{padding: 20, border: `2px solid ${OR}`, borderRadius: 16, textAlign: "center", marginBottom: 20}}>
+                <h1 style={{color: OR, margin: 0}}>RapportRadar Certificaat 🏆</h1>
+                <p style={{fontSize: 20, fontWeight: 800}}>Resultaat: {anim}% - {getAttest(anim).label}</p>
+             </div>
+          </div>
 
           {!fbData && (
             <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
@@ -2341,33 +2398,41 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
           <Disclaimer />
           
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
+          {fbData && (
+            <div style={{display: "flex", gap: 10, marginTop: 10}} className="no-print">
+              <button 
+                style={{ ...S.btn, flex: 1, margin: 0, background: "#3B82F6", boxShadow: "0 8px 24px rgba(59, 130, 246, 0.3)" }} 
+                onClick={() => window.print()}
+              >
+                🖨️ PDF Rapport Opslaan
+              </button>
+              <button 
+                style={{ ...S.btn, flex: 1, margin: 0, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
+                onClick={() => setScreen("game")}
+              >
+                🎯 Focus Checklist
+              </button>
+            </div>
+          )}
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}} className="no-print">
+            <button style={{...S.btnSec, margin: 0}} onClick={()=>setScreen("breakdown")}>
+              🔍 Berekening
+            </button>
             <button 
-              style={{ ...S.btn, flex: 1, background: saveSuccess ? "#22C55E" : OR }} 
+              style={{ ...S.btnSec, margin: 0, background: saveSuccess ? "#DCFCE7" : "white", color: saveSuccess ? "#15803D" : OR, borderColor: saveSuccess ? "#15803D" : OR }} 
               onClick={saveTodayScore}
-              disabled={saveSuccess}
+              disabled={saveSuccess || isDemo}
             >
-              {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla score op"}
+              {saveSuccess ? "✅ Opgeslagen" : "💾 Opslaan"}
             </button>
           </div>
 
-          {fbData && (
-            <button 
-              style={{ ...S.btn, background: "#3B82F6", boxShadow: "0 8px 24px rgba(59, 130, 246, 0.3)" }} 
-              onClick={() => setScreen("game")}
-            >
-              🎯 Bekijk Focus Checklist
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}} className="no-print">
+            <button style={{...S.btnSec, margin: 0}} onClick={()=>setScreen("grades")}>
+              ⚙️ Aanpassen
             </button>
-          )}
-
-          <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
-          <Disclaimer />
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
-            <button style={S.btnSec} onClick={()=>setScreen("grades")}>
-              ⚙️ Punten aanpassen
-            </button>
-            <button style={S.btnSec} onClick={()=>{
+            <button style={{...S.btnSec, margin: 0}} onClick={()=>{
               setVakken([]);
               setGedragAntw({});
               setNederlandsAntw({});
@@ -2376,9 +2441,11 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               setReportImage(null);
               setScreen("grades");
             }}>
-              🔄 Nieuwe puntenlijst
+              🔄 Nieuwe lijst
             </button>
           </div>
+          
+          <Disclaimer mini />
         </div>
       </div>
     );
@@ -2862,18 +2929,31 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         .markdown-body li { margin-bottom: 6px; }
         .markdown-body strong { color: ${OR}; font-weight: 800; }
       `}</style>
+      <style>{`
+        @media print {
+          .no-print { display: none !important; }
+          body { background: white !important; }
+          .print-area { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; }
+          .card { box-shadow: none !important; border: 1px solid #eee !important; page-break-inside: avoid; }
+        }
+      `}</style>
       <Blobs/>
       <SettingsModal/>
       <ProfileCard/>
       <BadgeNotification/>
       <TutorialModal/>
 
-      <div style={S.wrap} key={screen} className="animate-in">
+      <div style={S.wrap} key={screen} className="animate-in print-area">
         {!geenHeader.includes(screen) && currentUser && (
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}} className="no-print">
             <div style={{fontWeight:900,color:OR,fontSize:16,display:"flex",alignItems:"center",gap:6}}>
               <SmileyIcon size={24} /> RapportRadar
             </div>
+            {isDemo && (
+              <div style={{background: "#FEF3C7", color: "#92400E", padding: "4px 10px", borderRadius: 8, fontSize: 11, fontWeight: 800}}>
+                DEMO MODUS 🚧
+              </div>
+            )}
             <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
               <button 
                 onClick={() => setShowSettings(true)}
@@ -2920,6 +3000,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       <SettingsModal />
       <ProfileCard />
       <BadgeNotification />
+      <TutorialModal />
+      <PrivacyModal />
 
       {/* Subtle floating feedback button */}
       {currentUser && (
@@ -2936,6 +3018,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             gap: 8,
             cursor: "pointer"
           }}
+          className="no-print"
           onClick={() => setShowFeedback(true)}
         >
           <motion.div
