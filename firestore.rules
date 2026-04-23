@@ -52,16 +52,6 @@ service cloud.firestore {
              (!('score' in data) || data.score is number);
     }
 
-    function isValidFeedback(data) {
-      return data.keys().hasOnly(['userId', 'userEmail', 'userName', 'message', 'timestamp', 'rating']) &&
-             data.message is string && data.message.size() > 0 && data.message.size() < 5000 &&
-             data.timestamp is timestamp &&
-             (!('userId' in data) || data.userId is string) &&
-             (!('userEmail' in data) || data.userEmail is string) &&
-             (!('userName' in data) || data.userName is string) &&
-             (!('rating' in data) || (data.rating is number && data.rating >= 1 && data.rating <= 5));
-    }
-
     function isValidProgression(data) {
       return data.keys().hasOnly(['userId', 'score', 'date', 'timestamp']) &&
              data.userId is string &&
@@ -82,11 +72,6 @@ service cloud.firestore {
       allow create: if isOwner(userId) && isValidProgression(request.resource.data);
       allow update: if isOwner(userId) && isValidProgression(request.resource.data);
       allow delete: if isOwner(userId);
-    }
-
-    match /feedback/{feedbackId} {
-      allow create: if isAuthenticated() && isValidFeedback(request.resource.data);
-      allow read: if false; // Only admin can read feedback (manual check in console)
     }
   }
 }

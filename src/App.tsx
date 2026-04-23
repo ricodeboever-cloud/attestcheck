@@ -100,6 +100,20 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+// Hulpmiddel om te voorkomen dat functies (zoals badge requirements) in Firestore worden opgeslagen
+function cleanUserForFirestore(user: any) {
+  if (!user) return user;
+  const clean = { ...user };
+  if (clean.customBadges) {
+    clean.customBadges = clean.customBadges.map((b: any) => {
+      // Verwijder de requirement functie als die aanwezig is (custom badges gebruiken requirementType)
+      const { requirement, ...rest } = b;
+      return rest;
+    });
+  }
+  return clean;
+}
+
 interface ErrorBoundaryProps {
   children: ReactNode;
 }
@@ -176,12 +190,20 @@ const CONFIG = {
     { id: "first_step", name: "Eerste Stap 👣", description: "Voltooi je eerste focus punt.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 1 },
     { id: "focus_fan", name: "Focus Fanaat 🎯", description: "Voltooi 5 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 5 },
     { id: "consistency", name: "Consistentie Koning 👑", description: "Voltooi 10 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 10 },
+    { id: "focus_master", name: "Focus Meester 🏆", description: "Voltooi 25 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 25 },
+    { id: "focus_legend", name: "Focus Legende 🌌", description: "Voltooi 50 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 50 },
+    { id: "focus_god", name: "Focus God-mode ⚡", description: "Voltooi 100 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 100 },
     { id: "veteran", name: "Rapport Radar Veteraan 🎖️", description: "Sla 3 verschillende scores op.", requirement: (user: any, progression: any[]) => progression.length >= 3 },
     { id: "rising_star", name: "Stijgende Lijn 📈", description: "Heb een stijgende trend in je progressie.", requirement: (user: any, progression: any[]) => {
       if (progression.length < 2) return false;
       return progression[progression.length - 1].score > progression[0].score;
     }},
     { id: "expert_rank", name: "Elite Student 🎓", description: "Bereik de rang 'Expert'.", requirement: (user: any) => (user.xp || 0) >= 600 },
+    { id: "master_rank", name: "Meester Student 🏆", description: "Bereik de rang 'Meester'.", requirement: (user: any) => (user.xp || 0) >= 1000 },
+    { id: "legend_rank", name: "Legendarische Leerling 🛡️", description: "Bereik de rang 'Legende'.", requirement: (user: any) => (user.xp || 0) >= 3000 },
+    { id: "titan_rank", name: "School Titan ⚡", description: "Bereik de rang 'Titan'.", requirement: (user: any) => (user.xp || 0) >= 15000 },
+    { id: "oracle_rank", name: "Alwetend Oracle 👁️", description: "Bereik de rang 'Oracle'.", requirement: (user: any) => (user.xp || 0) >= 20000 },
+    { id: "god_rank", name: "Goddelijke Kennis 🌌", description: "Bereik de rang 'Demi-God'.", requirement: (user: any) => (user.xp || 0) >= 45000 },
   ]
 };
 
@@ -209,8 +231,6 @@ function AttestatieApp() {
   const [fbError,       setFbError]      = useState("");
   const [reportImage,   setReportImage]  = useState<string | null>(null);
   const [hasApiKey,     setHasApiKey]    = useState(true);
-  const [showFeedback,  setShowFeedback] = useState(false);
-  const [feedbackMsg,   setFeedbackMsg]  = useState("");
   
   // Grades Screen State (Elevated to prevent remount reset)
   const [grades_lv, setGrades_lv] = useState<any[]>([]);
@@ -219,9 +239,6 @@ function AttestatieApp() {
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [feedbackRating, setFeedbackRating] = useState(0);
-  const [feedbackLoading, setFeedbackLoading] = useState(false);
-  const [feedbackSuccess, setFeedbackSuccess] = useState(false);
   const [showSettings,   setShowSettings]  = useState(false);
   const [progression,    setProgression]   = useState<any[]>([]);
   const [progressionLoading, setProgressionLoading] = useState(false);
@@ -255,11 +272,12 @@ function AttestatieApp() {
       };
 
       const finalPoints = [...(updatedUser.focusPoints || []), newPoint];
-      await setDoc(doc(db, "users", updatedUser.uid), {
+      const userData = cleanUserForFirestore({
         ...updatedUser,
         focusPoints: finalPoints
       });
-      setCurrentUser({ ...updatedUser, focusPoints: finalPoints });
+      await setDoc(doc(db, "users", updatedUser.uid), userData);
+      setCurrentUser(userData);
     } catch (error) {
       console.error("Error generating new focus point:", error);
     }
@@ -290,23 +308,30 @@ function AttestatieApp() {
       const data = JSON.parse(response.text || "{}");
       if (!data.name) return;
 
+      const numCompleted = updatedUser.focusPoints?.filter((p: any) => p.completed).length || 0;
       const newBadge = {
         id: `custom_${Date.now()}`,
         name: data.name,
         description: data.description,
         requirementText: data.requirementText,
-        // We'll use a generic requirement for custom badges for now, 
-        // or try to parse the requirementText if we want to be fancy.
-        // For simplicity, let's say custom badges are earned by completing more focus points.
-        requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= ((user.focusPoints?.filter((p: any) => p.completed).length || 0) + 5)
+        requirementType: "focus_points",
+        requirementValue: numCompleted + 5
       };
 
       const customBadges = [...(updatedUser.customBadges || []), newBadge];
-      await setDoc(doc(db, "users", updatedUser.uid), {
-        ...updatedUser,
-        customBadges: customBadges
+      
+      const cleanCustomBadges = customBadges.map(b => {
+        const { requirement, ...rest } = b;
+        return rest;
       });
-      setCurrentUser({ ...updatedUser, customBadges: customBadges });
+
+      const userData = cleanUserForFirestore({
+        ...updatedUser,
+        customBadges: cleanCustomBadges
+      });
+
+      await setDoc(doc(db, "users", updatedUser.uid), userData);
+      setCurrentUser(userData);
     } catch (error) {
       console.error("Error generating new badge:", error);
     }
@@ -319,10 +344,15 @@ function AttestatieApp() {
 
     for (const badge of allAvailableBadges) {
       if (!earnedBadges.includes(badge.id)) {
-        // For custom badges, we might need to handle requirements differently if they are text-based
-        // but for now we use the function if it exists.
-        if (typeof badge.requirement === 'function' && badge.requirement(updatedUser, currentProgression)) {
-          newlyEarned.push(badge.id);
+        if (typeof badge.requirement === 'function') {
+          if (badge.requirement(updatedUser, currentProgression)) {
+            newlyEarned.push(badge.id);
+          }
+        } else if (badge.requirementType === 'focus_points') {
+          const completedCount = updatedUser.focusPoints?.filter((p: any) => p.completed).length || 0;
+          if (completedCount >= (badge.requirementValue || 0)) {
+            newlyEarned.push(badge.id);
+          }
         }
       }
     }
@@ -330,7 +360,7 @@ function AttestatieApp() {
     if (newlyEarned.length > 0) {
       const allEarned = [...earnedBadges, ...newlyEarned];
       try {
-        const userToUpdate = { ...updatedUser, badges: allEarned };
+        const userToUpdate = cleanUserForFirestore({ ...updatedUser, badges: allEarned });
         await setDoc(doc(db, "users", updatedUser.uid), userToUpdate);
         setCurrentUser(userToUpdate);
         
@@ -403,11 +433,33 @@ function AttestatieApp() {
   };
 
   const RANKS = [
-    { min: 0, name: "Starter 🔰", color: "#94A3B8" },
-    { min: 100, name: "Groeier 🌱", color: "#22C55E" },
-    { min: 300, name: "Strijder 💪", color: "#3B82F6" },
-    { min: 600, name: "Expert 🎓", color: "#A855F7" },
-    { min: 1000, name: "Meester 🏆", color: "#F59E0B" },
+    { min: 0,      name: "Starter 🔰", color: "#94A3B8" },
+    { min: 50,     name: "Nieuwkomer ✨", color: "#CBD5E1" },
+    { min: 100,    name: "Groeier 🌱", color: "#22C55E" },
+    { min: 150,    name: "Verkenner 🔭", color: "#4ADE80" },
+    { min: 200,    name: "Doorzetter 🏃", color: "#86EFAC" },
+    { min: 250,    name: "Ontdekker 🗺️", color: "#3B82F6" },
+    { min: 300,    name: "Strijder 💪", color: "#60A5FA" },
+    { min: 400,    name: "Klimmer 🧗", color: "#93C5FD" },
+    { min: 500,    name: "Talent 🌟", color: "#FACC15" },
+    { min: 600,    name: "Expert 🎓", color: "#A855F7" },
+    { min: 700,    name: "Specialist 🧪", color: "#C084FC" },
+    { min: 800,    name: "Gevorderde 🚀", color: "#E879F9" },
+    { min: 900,    name: "Prof 👨‍🏫", color: "#F472B6" },
+    { min: 1000,   name: "Meester 🏆", color: "#F59E0B" },
+    { min: 1500,   name: "Mentor 🧠", color: "#D946EF" },
+    { min: 2000,   name: "Elite 💎", color: "#EF4444" },
+    { min: 3000,   name: "Legende 🛡️", color: "#FB923C" },
+    { min: 5000,   name: "Kampioen 🥇", color: "#F97316" },
+    { min: 7500,   name: "Grootmeester 🏛️", color: "#EA580C" },
+    { min: 10000,  name: "Fenomeen 🎇", color: "#C026D3" },
+    { min: 15000,  name: "Titan ⚡", color: "#4F46E5" },
+    { min: 20000,  name: "Oracle 👁️", color: "#7C3AED" },
+    { min: 30000,  name: "Overlord 👑", color: "#9333EA" },
+    { min: 45000,  name: "Demi-God 🌪️", color: "#DB2777" },
+    { min: 60000,  name: "Alwetende ♾️", color: "#E11D48" },
+    { min: 80000,  name: "Universeel Genie 🌌", color: "#F43F5E" },
+    { min: 100000, name: "Oneindige Wijsheid 🏮", color: "#FF0000" },
   ];
 
   const getRankInfo = (xp: number) => {
@@ -442,12 +494,13 @@ function AttestatieApp() {
     point.completed = !wasCompleted;
 
     try {
-      const updatedUser = { 
+      const updatedXP = (currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue);
+      const updatedUser = cleanUserForFirestore({ 
         ...currentUser, 
         focusPoints: points,
-        xp: (currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue),
-        rank: getRankInfo((currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue)).name
-      };
+        xp: updatedXP,
+        rank: getRankInfo(updatedXP).name
+      });
       await setDoc(doc(db, "users", currentUser.uid), updatedUser);
       setCurrentUser(updatedUser);
       if (point.completed) {
@@ -737,7 +790,7 @@ Geef voor ELK van de drie attesten (A, B en C) een analyse:
 5. consequences: Gevolgen van dit attest.
 6. emoji: Passende emoji.
 Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
-Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 10 woorden per doel) die de student zelf kan afvinken (bijv. 'Elke dag 15 min woordjes Frans leren').`;
+Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse doelen (max 10 woorden per doel) die de student zelf kan afvinken. Zorg dat deze doelen AFWIJKEN van vorige doelen als je die ziet in de context (bijv. 'Elke dag 15 min woordjes Frans leren', 'Vraag extra uitleg voor Wiskunde', etc.).`;
 
       const contents: any[] = [{ text: prompt }];
       if (reportImage) {
@@ -813,29 +866,30 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
       if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
       
-      // Focus points omzetten naar objecten voor de checklist
+      // Focus points omzetten naar objecten voor de checklist en toevoegen aan bestaande (niet-voltooide) lijst
       if (data.focusPoints && currentUser) {
         const newFocusPoints: FocusPoint[] = data.focusPoints.map((text, i) => ({
           id: `fp_${Date.now()}_${i}`,
           text,
           completed: false,
-          xpValue: 20,
+          xpValue: 20 + Math.floor(Math.random() * 11), // Variabele XP tussen 20 en 30
           createdAt: new Date().toISOString()
         }));
         
+        // Behoud oude focuspunten die nog niet voltooid zijn, maar voeg de nieuwe toe bovenaan
+        const updatedFocusPoints = [...newFocusPoints, ...(currentUser.focusPoints || []).filter((p: any) => !p.completed)];
+        
         // Opslaan in Firestore
-        await setDoc(doc(db, "users", currentUser.uid), {
+        const updatedXP = (currentUser.xp || 0) + 50;
+        const userData = cleanUserForFirestore({
           ...currentUser,
-          focusPoints: newFocusPoints,
-          xp: (currentUser.xp || 0) + 50, // 50 XP voor de analyse zelf
-          rank: getRankInfo((currentUser.xp || 0) + 50).name
+          focusPoints: updatedFocusPoints,
+          xp: updatedXP,
+          rank: getRankInfo(updatedXP).name
         });
-        setCurrentUser({ 
-          ...currentUser, 
-          focusPoints: newFocusPoints, 
-          xp: (currentUser.xp || 0) + 50,
-          rank: getRankInfo((currentUser.xp || 0) + 50).name
-        });
+
+        await setDoc(doc(db, "users", currentUser.uid), userData);
+        setCurrentUser(userData);
       }
 
       setFbData(data);
@@ -1057,6 +1111,29 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
     );
   };
 
+  // ── DISCLAIMER ──────────────────────────────────────────────
+  const Disclaimer = ({ mini = false }: { mini?: boolean }) => (
+    <div style={{
+      marginTop: mini ? 15 : 24,
+      padding: mini ? "10px 14px" : "18px 22px",
+      background: "rgba(255, 255, 255, 0.6)",
+      border: `1.5px solid ${ORPL}`,
+      borderRadius: 20,
+      fontSize: mini ? 11 : 13,
+      color: "#64748B",
+      textAlign: "center",
+      lineHeight: 1.5,
+      backdropFilter: "blur(5px)"
+    }}>
+      <div style={{ fontWeight: 900, marginBottom: 5, color: ORD, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: mini ? 12 : 14 }}>
+        <span>⚠️</span> Belangrijk: Geen garantie
+      </div>
+      RapportRadar is <strong>niet verbonden aan een officiële school</strong>. 
+      Deze voorspelling is <strong>slechts een indicatie</strong>. 
+      De echte beslissing over je attest wordt altijd genomen door de <strong>klassenraad</strong> van jouw school.
+    </div>
+  );
+
   // ── LAADSCHERM ─────────────────────────────────────────────
   const LoadingScreen = () => (
     <div style={{textAlign:"center",paddingTop:80}}>
@@ -1245,6 +1322,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         >
           Hoe werkt het? ❓
         </button>
+        <Disclaimer />
       </div>
     );
   };
@@ -1275,15 +1353,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             Klaar om te ontdekken welk attest je dit jaar kunt verwachten? 🎓
           </p>
           
-          <div style={{background:ORBG, borderRadius:16, padding:18, marginBottom:24, textAlign:"left", border:`1px solid ${ORPL}`}}>
-            <p style={{fontWeight:800, color:ORD, marginBottom:10, fontSize:14}}>📝 Jouw Profiel:</p>
-            <div style={{display:"grid", gap:8, fontSize:14, color:"#5D3D1A"}}>
-              <div>🏫 <strong>School:</strong> {school || "Niet ingesteld"}</div>
-              <div>📅 <strong>Jaar:</strong> {jaar || "Niet ingesteld"}</div>
-              <div>🚀 <strong>Richting:</strong> {richting || "Niet ingesteld"}</div>
-            </div>
-          </div>
-
           <button style={S.btn} onClick={startNieuweAnalyse}>
             Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
           </button>
@@ -1295,9 +1364,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             Mijn Spel & Progressie 🎮
           </button>
           
-          <button style={S.btnSec} onClick={()=>setShowSettings(true)}>
-            Profiel Aanpassen ⚙️
-          </button>
+          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1523,6 +1590,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 <strong>Tip:</strong> Hoofdvakken tellen {CONFIG.hoofdvakMultiplier}× zwaarder mee. Tik op een vak om het aan/uit te zetten.
           </div>
           <button style={S.btn} onClick={verder}>Verder → Punten invoeren 📊</button>
+          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1771,6 +1839,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           ))}
           <div style={{fontSize:11,color:"#8B6242",margin:"8px 0 20px",fontStyle:"italic"}}>⭐ = Hoofdvak (telt {CONFIG.hoofdvakMultiplier}× zwaarder mee)</div>
           <button style={S.btn} onClick={verder}>Verder → Belangrijke vakken ⭐</button>
+          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1876,6 +1945,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 Gedrag telt voor <strong>{Math.round(CONFIG.gedragGewicht*100)}%</strong> mee. Je Nederlands kan je score met <strong>3%</strong> verhogen of verlagen.
           </div>
           <button style={S.btn} onClick={verder}>🎯 Bekijk mijn resultaat!</button>
+          <Disclaimer mini />
         </div>
       </div>
     );
@@ -2242,9 +2312,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             </div>
           )}
 
-          <div style={{fontSize:12,color:"#8B6242",marginBottom:20,textAlign:"center",fontStyle:"italic",lineHeight:1.5}}>
-            ⚠️ Dit is een indicatie. De officiële beslissing ligt altijd bij de school.
-          </div>
+          <Disclaimer />
           
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
             <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
@@ -2267,7 +2335,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           )}
 
           <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+          <Disclaimer />
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
             <button style={S.btnSec} onClick={()=>setScreen("grades")}>
               ⚙️ Punten aanpassen
             </button>
@@ -2364,102 +2433,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
-  // ── 9. FEEDBACK MODAL ───────────────────────────
-  const FeedbackModal = () => {
-    if (!showFeedback) return null;
-
-    const submitFeedback = async () => {
-      if (!feedbackMsg.trim()) return;
-      setFeedbackLoading(true);
-      try {
-        await addDoc(collection(db, "feedback"), {
-          userId: currentUser?.uid || "anonymous",
-          userEmail: currentUser?.email || "anonymous",
-          userName: currentUser?.naam || "anonymous",
-          message: feedbackMsg,
-          rating: feedbackRating,
-          timestamp: serverTimestamp()
-        });
-        setFeedbackSuccess(true);
-        setTimeout(() => {
-          setShowFeedback(false);
-          setFeedbackSuccess(false);
-          setFeedbackMsg("");
-          setFeedbackRating(0);
-        }, 2000);
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, "feedback");
-      } finally {
-        setFeedbackLoading(false);
-      }
-    };
-
-    return (
-      <div style={{
-        position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:1000,
-        display:"flex", alignItems:"center", justifyContent:"center", padding:20,
-        backdropFilter:"blur(4px)"
-      }}>
-        <div style={{...S.card, width:"100%", maxWidth:400, position:"relative", animation:"bounce .3s ease"}}>
-          <button 
-            style={{position:"absolute", top:16, right:16, background:"none", border:"none", fontSize:24, cursor:"pointer", color:"#8B6242"}}
-            onClick={() => setShowFeedback(false)}
-          >✕</button>
-          
-          <div style={{textAlign:"center", marginBottom:20}}>
-            <div style={{fontSize:40, marginBottom:8}}>💡</div>
-            <h2 style={S.h2}>Laat ons weten wat je vindt!</h2>
-            <p style={S.sub}>Jouw feedback helpt ons RapportRadar te verbeteren.</p>
-          </div>
-
-          {feedbackSuccess ? (
-            <div style={{...S.ok, textAlign:"center", padding:20}}>
-              <div style={{fontSize:30, marginBottom:10}}>✨</div>
-              Bedankt voor je feedback!
-            </div>
-          ) : (
-            <>
-              <div style={{marginBottom:16}}>
-                <label style={S.lbl}>Hoe tevreden ben je? (optioneel)</label>
-                <div style={{display:"flex", justifyContent:"center", gap:10, marginTop:8}}>
-                  {[1,2,3,4,5].map(star => (
-                    <button 
-                      key={star} 
-                      onClick={() => setFeedbackRating(star)}
-                      style={{
-                        background:"none", border:"none", fontSize:28, cursor:"pointer",
-                        filter: feedbackRating >= star ? "none" : "grayscale(100%) opacity(0.3)",
-                        transition:"all .2s"
-                      }}
-                    >⭐</button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{marginBottom:20}}>
-                <label style={S.lbl}>Wat kan er beter?</label>
-                <textarea 
-                  style={{...S.input, height:120, resize:"none", marginTop:4}}
-                  placeholder="Typ hier je suggesties of opmerkingen..."
-                  value={feedbackMsg}
-                  onChange={(e) => setFeedbackMsg(e.target.value)}
-                />
-              </div>
-
-              <button 
-                style={{...S.btn, opacity: feedbackMsg.trim() ? 1 : 0.5}} 
-                onClick={submitFeedback}
-                disabled={feedbackLoading || !feedbackMsg.trim()}
-              >
-                {feedbackLoading ? "⏳ Verzenden..." : "Verzenden 🚀"}
-              </button>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   // ── 13. GAME SCREEN (GAMIFICATION HUB) ─────────────────────
   const BadgeNotification = () => {
     if (!newBadge) return null;
@@ -2545,12 +2518,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
               <span style={{fontSize: 24}}>🎯</span> Focus Checklist
             </h3>
-            <p style={{...S.sub, marginBottom: 20}}>Voltooi deze doelen om extra XP te verdienen en sneller te stijgen in rang!</p>
+            <p style={{...S.sub, marginBottom: 20}}>Voltooi deze doelen om extra XP te verdienen en sneller te stijgen in rang! Elke analyse voegt nieuwe doelen toe.</p>
             <div style={{ 
               display: "flex", 
               flexDirection: "column", 
               gap: 12,
-              maxHeight: 280, // Fits roughly 3 items (each ~80px + gap)
+              maxHeight: 400, // Iets groter nu er meer doelen kunnen zijn
               overflowY: "auto",
               paddingRight: 8,
               scrollbarWidth: "thin",
@@ -3047,7 +3020,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         .markdown-body strong { color: ${OR}; font-weight: 800; }
       `}</style>
       <Blobs/>
-      <FeedbackModal/>
       <SettingsModal/>
       <ProfileCard/>
       <BadgeNotification/>
@@ -3068,13 +3040,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                 }}
                 title="Instellingen"
               >⚙️</button>
-              <button 
-                onClick={() => setShowFeedback(true)}
-                style={{
-                  background:ORBG, border:`1px solid ${ORPL}`, borderRadius:20, 
-                  padding:"5px 10px", fontSize:12, fontWeight:700, color:ORD, cursor:"pointer"
-                }}
-              >💡 Feedback</button>
               <button 
                 onClick={() => setShowProfile(true)}
                 style={{
