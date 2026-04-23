@@ -198,12 +198,19 @@ const CONFIG = {
       if (progression.length < 2) return false;
       return progression[progression.length - 1].score > progression[0].score;
     }},
-    { id: "expert_rank", name: "Elite Student 🎓", description: "Bereik de rang 'Expert'.", requirement: (user: any) => (user.xp || 0) >= 600 },
-    { id: "master_rank", name: "Meester Student 🏆", description: "Bereik de rang 'Meester'.", requirement: (user: any) => (user.xp || 0) >= 1000 },
-    { id: "legend_rank", name: "Legendarische Leerling 🛡️", description: "Bereik de rang 'Legende'.", requirement: (user: any) => (user.xp || 0) >= 3000 },
-    { id: "titan_rank", name: "School Titan ⚡", description: "Bereik de rang 'Titan'.", requirement: (user: any) => (user.xp || 0) >= 15000 },
-    { id: "oracle_rank", name: "Alwetend Oracle 👁️", description: "Bereik de rang 'Oracle'.", requirement: (user: any) => (user.xp || 0) >= 20000 },
-    { id: "god_rank", name: "Goddelijke Kennis 🌌", description: "Bereik de rang 'Demi-God'.", requirement: (user: any) => (user.xp || 0) >= 45000 },
+    { id: "math_wizard", name: "Wiskunde Wonder 🔢", description: "Behaal meer dan 85% op Wiskunde.", requirement: (user: any) => user.vakken?.some((v: any) => v.naam.toLowerCase().includes('wiskunde') && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
+    { id: "language_hero", name: "Talenknobbel 🗣️", description: "Behaal een topscore op een taalvak (NL, FR of ENG).", requirement: (user: any) => user.vakken?.some((v: any) => (v.naam.toLowerCase().includes('frans') || v.naam.toLowerCase().includes('engels') || v.naam.toLowerCase().includes('nederlands')) && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
+    { id: "behavior_star", name: "Modelstudent ✨", description: "Scoor maximaal op al je gedragsvragen.", requirement: (user: any) => Object.keys(user.gedragAntw || {}).length >= 5 && Object.values(user.gedragAntw || {}).every(v => v === 5) },
+    { id: "perfectionist", name: "Perfectionist 💎", description: "Behaal een totale score van meer dan 90%.", requirement: (user: any) => (user.score || 0) >= 90 },
+    { id: "comeback_kid", name: "Comeback Kid 🔝", description: "Verbeter je score met meer dan 10% in één meting.", requirement: (user: any, progression: any[]) => {
+      if (progression.length < 2) return false;
+      return (progression[progression.length - 1].score - progression[progression.length - 2].score) >= 10;
+    }},
+    { id: "heavy_lifter", name: "Zware Lader 🏋️", description: "Behaal meer dan 75% op al je hoofdvakken.", requirement: (user: any) => {
+      const hoofdvakken = user.vakken?.filter((v: any) => v.isHoofdvak);
+      return hoofdvakken && hoofdvakken.length > 0 && hoofdvakken.every((v: any) => (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.75);
+    }},
+    { id: "early_bird", name: "Vroege Vogel 🐦", description: "Voer een analyse uit voor 8u 's ochtends.", requirement: () => new Date().getHours() < 8 },
   ]
 };
 
@@ -295,9 +302,11 @@ function AttestatieApp() {
       if (!earnedBadge) return;
 
       const prompt = `Je bent een gamification expert. De student heeft de badge "${earnedBadge.name}" behaald (${earnedBadge.description}).
-      Bedenk ÉÉN nieuwe, uitdagendere badge (naam + beschrijving + vereiste in tekst) die hierop volgt.
+      Bedenk ÉÉN nieuwe, uitdagendere en ORIGINELE badge (naam + beschrijving + vereiste in tekst) die hierop volgt.
+      BELANGRIJK: Focus op prestaties en inzet, NIET op het bereiken van een bepaalde rang of XP (dat is saai).
+      Bedenk iets creatiefs zoals "Taalkoning", "Wiskunde Tijger", "Doorzetter van de Week", etc.
       Geef dit terug in JSON formaat met velden: name, description, requirementText.
-      De requirementText moet een simpele voorwaarde zijn (bijv. "Voltooi 15 focus punten").`;
+      De requirementText moet een simpele voorwaarde zijn (bijv. "Voltooi nog 10 focus punten").`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -2223,41 +2232,55 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               </div>
 
               {/* Attest Knoppen */}
-              <div style={{display:"flex", gap:8, background:ORBG, padding:6, borderRadius:16}}>
+              <div style={{display:"flex", gap:8, background:ORBG, padding:6, borderRadius:16, marginBottom: 12}}>
                 {(["A", "B", "C"] as const).map((at) => {
                   const isActive = selectedAttest === at;
                   const isPredicted = fbData.predictedAttest === at;
                   const info = fbData.attests[at];
                   
                   return (
-                    <button
+                    <motion.button
                       key={at}
+                      whileHover={{ y: -2, scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
                       onClick={() => setSelectedAttest(at)}
                       style={{
                         flex: 1,
-                        padding: "12px 8px",
+                        padding: "16px 8px", // Iets ruimer
                         borderRadius: 12,
-                        border: "none",
+                        border: isActive ? `2px solid ${OR}` : "2px solid transparent",
                         cursor: "pointer",
-                        background: isActive ? OR : "transparent",
+                        background: isActive ? OR : "white",
                         color: isActive ? "white" : "#8B6242",
-                        transition: "all .2s",
+                        boxShadow: isActive ? `0 4px 12px ${OR}44` : "0 2px 4px rgba(0,0,0,0.05)",
+                        transition: "background-color 0.2s, color 0.2s, box-shadow 0.2s",
                         position: "relative",
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
-                        gap: 4
+                        gap: 4,
+                        overflow: "visible"
                       }}
                     >
-                      <span style={{fontSize:18, fontWeight:900}}>{at}</span>
-                      <span style={{fontSize:9, fontWeight:800, textTransform:"uppercase", opacity:0.8}}>Attest</span>
+                      <span style={{fontSize:22, fontWeight:900}}>{at}</span>
+                      <span style={{fontSize:10, fontWeight:800, textTransform:"uppercase", opacity:0.8}}>Attest</span>
                       {isPredicted && (
                         <div style={{
-                          position:"absolute", top:-4, right:-4, background:"#22C55E", color:"white",
-                          fontSize:8, padding:"2px 5px", borderRadius:10, fontWeight:900, border:"2px solid white"
+                          position:"absolute", top:-10, left: "50%", transform: "translateX(-50%)", background:"#22C55E", color:"white",
+                          fontSize:9, padding:"2px 8px", borderRadius:20, fontWeight:900, border:"2px solid white",
+                          boxShadow: "0 2px 8px rgba(34, 197, 94, 0.4)", whiteSpace: "nowrap"
                         }}>HUIDIG</div>
                       )}
-                    </button>
+                      
+                      {!isActive && (
+                        <div style={{
+                          position: "absolute", bottom: -15, width: "100%", textAlign: "center",
+                          fontSize: 9, fontWeight: 700, color: OR, opacity: 0.6
+                        }}>
+                          Klik voor info 👆
+                        </div>
+                      )}
+                    </motion.button>
                   );
                 })}
               </div>
