@@ -40,7 +40,7 @@ import SmileyIcon from "./components/SmileyIcon";
 import FeedbackModal from "./components/FeedbackModal";
 import SettingsModal from "./components/SettingsModal";
 import ProfileCard from "./components/ProfileCard";
-import { useApp } from "./context/AppContext";
+import { useApp, Vak } from "./context/AppContext";
 import { getReferralRankInfo } from "./constants";
 
 declare global {
@@ -1708,7 +1708,10 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   // ── 5. HOOFDVAKKEN ─────────────────────────────────────────
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
-    const toggle = (id: string) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
+    const toggle = (id: string | number) => {
+      const idStr = id.toString();
+      setLv(lv.map(v => v.id.toString() === idStr ? { ...v, isHoofdvak: !v.isHoofdvak } : v));
+    };
     const verder = async () => {
       try {
         if (currentUser?.uid) {
@@ -1785,14 +1788,20 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     const ocrLoading = grades_ocrLoading;
     const setOcrLoading = setGrades_ocrLoading;
 
-    const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
+    const updateVak = (id: string | number, field: string, val: string) => {
+      const idStr = id.toString();
+      setLv(lv.map(v => v.id.toString() === idStr ? { ...v, [field]: val } : v));
+    };
 
     const voegToe = () => {
       if (!nv.trim()) return;
-      setLv([...lv, { id: Date.now(), naam: nv.trim(), isHoofdvak: false, punt: "", maxPunt: "20" }]);
+      setLv([...lv, { id: Date.now().toString(), naam: nv.trim(), isHoofdvak: false, punt: "", maxPunt: "20" }]);
       setNv("");
     };
-    const verwijder = (id: number) => setLv(lv.filter(v => v.id !== id));
+    const verwijder = (id: string | number) => {
+      const idStr = id.toString();
+      setLv(lv.map(v => v.id.toString() === idStr ? null : v).filter(Boolean) as Vak[]);
+    };
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const fileList = e.target.files;
@@ -1887,7 +1896,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               const pStr = e.punt.replace(",", ".");
               const p = parseFloat(pStr);
               const m = e.maxPunt || (p > 20 ? "100" : "20");
-              return { id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
+              return { id: (Date.now() + Math.random()).toString(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
             });
           return [...updated, ...nieuw];
         });

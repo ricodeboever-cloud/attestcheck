@@ -33,7 +33,7 @@ service cloud.firestore {
       
       allow update: if isOwner(userId) && isValidUser(incoming()) &&
                     incoming().email == existing().email &&
-                    incoming().uid == existing().uid;
+                    (!('uid' in incoming()) || !('uid' in existing()) || incoming().uid == existing().uid);
 
       // Subcollection for progression tracking
       match /progression/{date} {
