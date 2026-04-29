@@ -34,6 +34,21 @@ export const getRankInfo = (xp: number) => {
   return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
 };
 
+export const REFERRAL_RANKS = [
+  { min: 0, name: "Rekruut", icon: "🔰" },
+  { min: 1, name: "Soldaat", icon: "🎖️" },
+  { min: 3, name: "Korporaal", icon: "🔱" },
+  { min: 5, name: "Sergeant", icon: "⚜️" },
+  { min: 10, name: "Luitenant", icon: "⚔️" },
+  { min: 20, name: "Kapitein", icon: "🦅" },
+  { min: 50, name: "Majoor", icon: "🛡️" },
+  { min: 100, name: "Generaal", icon: "👑" },
+];
+
+export const getReferralRankInfo = (referrals: number) => {
+  return [...REFERRAL_RANKS].reverse().find(r => referrals >= r.min) || REFERRAL_RANKS[0];
+};
+
 export const S: any = {
   page: {
     fontFamily: "'Nunito','Arial Rounded MT Bold',sans-serif",

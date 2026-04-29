@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
+import { doc, getDoc, getDocFromServer, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { GoogleGenAI, Type } from "@google/genai";
-import { CONFIG, getRankInfo, RANKS } from '../constants';
+import { CONFIG, getRankInfo, RANKS, getReferralRankInfo } from '../constants';
 
 declare global {
   interface Window {
@@ -62,6 +62,11 @@ export interface UserProfile {
   xp?: number;
   rank?: string;
   focusPoints?: FocusPoint[];
+  referralsCount?: number;
+  referredBy?: string;
+  progression?: any[];
+  badges?: string[];
+  customBadges?: any[];
 }
 
 interface AppContextType {
@@ -126,10 +131,58 @@ interface AppContextType {
   isDemo: boolean;
   setIsDemo: (d: boolean) => void;
   startDemo: () => void;
+  referralId: string | null;
   loading: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -160,7 +213,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const [isDemo, setIsDemo] = useState(false);
+  const [referralId, setReferralId] = useState<string | null>(null);
   const today = new Date().toISOString().split('T')[0];
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const ref = params.get('ref');
+    if (ref) {
+      setReferralId(ref);
+      sessionStorage.setItem('referralId', ref);
+    } else {
+      const stored = sessionStorage.getItem('referralId');
+      if (stored) setReferralId(stored);
+    }
+  }, []);
 
   const startDemo = () => {
     setIsDemo(true);
@@ -174,6 +240,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       richting: "Wetenschappen",
       xp: 1250,
       rank: getRankInfo(1250).name,
+      referralsCount: 2,
       focusPoints: [
         { id: "fp_1", text: "Franse woordjes oefenen (Unit 4)", completed: false, xpValue: 20, createdAt: new Date().toISOString() },
         { id: "fp_2", text: "Wiskunde oefeningen over functies maken", completed: true, xpValue: 20, createdAt: new Date().toISOString() },
@@ -444,6 +511,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
     checkApiKey();
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
+        const userPath = `users/${fbUser.uid}`;
         try {
           const snap = await getDoc(doc(db, "users", fbUser.uid));
           if (snap.exists()) {
@@ -457,11 +525,13 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
             if (data.gedragAntw) setGedragAntw(data.gedragAntw);
             if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
             if (data.score !== undefined) setScore(data.score);
+            if (data.progression) setProgression(data.progression);
           } else {
             setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
           }
         } catch (error) {
-          console.error("Error loading user profile:", error);
+          console.error("Error fetching user profile, falling back to basic info:", error);
+          setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
         }
       } else {
         setCurrentUser(null);
@@ -504,6 +574,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       saveTodayScore,
       logout, checkApiKey, getApiKey,
       isDemo, setIsDemo, startDemo,
+      referralId,
       loading
     }}>
       {children}

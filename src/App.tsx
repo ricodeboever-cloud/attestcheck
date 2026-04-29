@@ -13,7 +13,9 @@ import {
   getDocFromServer,
   collection,
   addDoc,
-  serverTimestamp
+  serverTimestamp,
+  updateDoc,
+  increment
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -39,6 +41,7 @@ import FeedbackModal from "./components/FeedbackModal";
 import SettingsModal from "./components/SettingsModal";
 import ProfileCard from "./components/ProfileCard";
 import { useApp } from "./context/AppContext";
+import { getReferralRankInfo } from "./constants";
 
 declare global {
   interface Window {
@@ -226,24 +229,51 @@ const ORBG = "#FFF5EC";
 const ORPL = "#FFE4C4";
 
 function AttestatieApp() {
-  const { setShowFeedback, setShowSettings, setShowProfile, isDemo, setIsDemo, startDemo } = useApp();
+  const { 
+    currentUser, 
+    setCurrentUser, 
+    school, 
+    setSchool, 
+    jaar, 
+    setJaar, 
+    leeftijd, 
+    setLeeftijd, 
+    richting, 
+    setRichting, 
+    vakken, 
+    setVakken, 
+    gedragAntw, 
+    setGedragAntw, 
+    nederlandsAntw, 
+    setNederlandsAntw, 
+    score, 
+    setScore, 
+    fbData, 
+    setFbData, 
+    fbLoad, 
+    setFbLoad, 
+    fbError, 
+    setFbError, 
+    reportImage, 
+    setReportImage, 
+    progression, 
+    setProgression, 
+    saveSuccess, 
+    setSaveSuccess, 
+    hasApiKey, 
+    setHasApiKey, 
+    selectedAttest, 
+    setSelectedAttest,
+    setShowFeedback, 
+    setShowSettings, 
+    setShowProfile, 
+    isDemo, 
+    setIsDemo, 
+    startDemo,
+    loading: contextLoading
+  } = useApp();
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [screen,        setScreen]       = useState("loading");
-  const [currentUser,   setCurrentUser]  = useState<any>(null);
-  const [school,        setSchool]       = useState("");
-  const [jaar,          setJaar]         = useState("");
-  const [leeftijd,      setLeeftijd]     = useState("");
-  const [richting,      setRichting]     = useState("");
-  const [vakken,        setVakken]       = useState<any[]>([]);
-  const [gedragAntw,    setGedragAntw]   = useState<any>({});
-  const [nederlandsAntw, setNederlandsAntw] = useState<any>({});
-  const [score,         setScore]        = useState<number | null>(null);
-  const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
-  const [selectedAttest, setSelectedAttest] = useState<"A" | "B" | "C" | null>(null);
-  const [fbLoad,        setFbLoad]       = useState(false);
-  const [fbError,       setFbError]      = useState("");
-  const [reportImage,   setReportImage]  = useState<string | null>(null);
-  const [hasApiKey,     setHasApiKey]    = useState(true);
   
   // Grades Screen State (Elevated to prevent remount reset)
   const [grades_lv, setGrades_lv] = useState<any[]>([]);
@@ -252,9 +282,7 @@ function AttestatieApp() {
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [progression,    setProgression]   = useState<any[]>([]);
   const [progressionLoading, setProgressionLoading] = useState(false);
-  const [saveSuccess,    setSaveSuccess]   = useState(false);
   const [newBadge,       setNewBadge]      = useState<any>(null);
 
   // ── PRIVACY MODAL ──────────────────────────────────────────
@@ -961,45 +989,17 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
       }
     }
     testConnection();
+  }, []);
 
-    // Luister naar login/logout events van Firebase
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
-      if (fbUser) {
-        try {
-          const snap = await getDoc(doc(db, "users", fbUser.uid));
-          if (snap.exists()) {
-            const data = snap.data();
-            setCurrentUser({ uid: fbUser.uid, ...data });
-            if (data.school)   setSchool(data.school);
-            if (data.jaar)     setJaar(data.jaar);
-            if (data.leeftijd) setLeeftijd(data.leeftijd);
-            if (data.richting) setRichting(data.richting);
-            if (data.vakken)   setVakken(data.vakken);
-            if (data.gedragAntw) setGedragAntw(data.gedragAntw);
-            if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
-            if (data.score !== undefined) setScore(data.score);
-            
-            // Skip onboarding if profile is complete
-            if (data.school && data.jaar && data.leeftijd && data.richting) {
-              setScreen("dashboard");
-            } else {
-              setScreen("dashboard"); // Always go to dashboard if logged in, profile can be set in settings
-            }
-          } else {
-            setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
-            setScreen("dashboard");
-          }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
-          setScreen("dashboard");
-        }
+  useEffect(() => {
+    if (!contextLoading) {
+      if (currentUser) {
+        setScreen("dashboard");
       } else {
-        setCurrentUser(null);
         setScreen("welcome");
       }
-    });
-    return () => unsub();
-  }, []);
+    }
+  }, [currentUser, contextLoading]);
 
   // ── Score berekening ───────────────────────────────────────
   const berekenScore = (vakkenData: any[], antwoorden: any, nedAntw: any) => {
@@ -1338,38 +1338,53 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const WelcomeScreen = () => {
     return (
       <div style={{textAlign:"center",paddingTop:60}}>
-        <div style={{marginBottom:12}}>
-          <SmileyIcon size={80} />
+        <div style={{marginBottom:18}}>
+          <SmileyIcon size={90} />
         </div>
         <h1 style={{fontSize:42,fontWeight:900,color:OR,margin:"0 0 10px",letterSpacing:"-1px"}}>RapportRadar</h1>
         <p style={{...S.sub,fontSize:18,marginBottom:40,lineHeight:1.4,fontWeight:800,color:"#2D1B00"}}>
           Welk attest haal jij? <br/>
           <span style={{color:"#8B6242",fontSize:16,fontWeight:500}}>Krijg direct een slimme voorspelling van je schoolresultaten. 🎓</span>
         </p>
-        <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
-        <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
-        
-        <div style={{marginTop: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "center"}}>
+
+        <div style={{
+          background: "white",
+          padding: 24,
+          borderRadius: 24,
+          boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
+          border: `2px solid ${ORPL}`,
+          marginBottom: 30,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          position: "relative",
+          overflow: "hidden"
+        }}>
+          <div style={{position:"absolute", top:0, left:0, right:0, height:4, background:OR}}></div>
+          <h2 style={{...S.h2, fontSize: 18, marginBottom: 4, color: OR}}>Direct Proberen? 🚀</h2>
+          <p style={{...S.sub, fontSize: 13, marginBottom: 12}}>
+            Ontdek RapportRadar zonder account via onze interactieve demo.
+          </p>
           <button 
-            style={{...S.btnSec, border: `2px dashed ${OR}`, background: `${OR}08`}} 
+            style={{...S.btn, margin: 0, background: OR, boxShadow: `0 8px 20px ${OR}44` }} 
             onClick={() => {
               startDemo();
               setScreen("dashboard");
             }}
           >
-            🚀 Bekijk de Demo (Direct proberen)
-          </button>
-          
-          <button 
-            style={{background: "transparent", border: "none", color: "#8B6242", textDecoration: "underline", fontSize: 13, cursor: "pointer"}} 
-            onClick={() => {
-              setTutorialStep(0);
-              setShowTutorial(true);
-            }}
-          >
-            Hoe werkt het precies? ❓
+            Bekijk de Demo Loop ✨
           </button>
         </div>
+        
+        <div style={{display: "flex", flexDirection: "column", gap: 12}}>
+          <button style={{...S.btnSec, border: "2px solid #E2E8F0"}} onClick={()=>setScreen("register")}>
+            🌟 Maak gratis account
+          </button>
+          <button style={{...S.btnSec, border: "none", background: "transparent"}} onClick={()=>setScreen("login")}>
+            Ik heb al een account
+          </button>
+        </div>
+        
         <Disclaimer />
       </div>
     );
@@ -1379,6 +1394,19 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const DashboardScreen = () => {
     const xp = currentUser?.xp || 0;
     const rank = getRankInfo(xp);
+    const [copied, setCopied] = useState(false);
+
+    const refCount = currentUser?.referralsCount || 0;
+    const refRank = getReferralRankInfo(refCount);
+    
+    // Construct referral link
+    const refLink = `${window.location.origin}${window.location.pathname}?ref=${currentUser?.uid}`;
+
+    const copyLink = () => {
+      navigator.clipboard.writeText(refLink);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
 
     const startNieuweAnalyse = () => {
       setVakken([]);
@@ -1393,13 +1421,25 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div style={{paddingTop:10}}>
         <div style={{...S.card, textAlign:"center", padding:30}}>
-          <div style={{marginBottom:16}}>
+          <div style={{marginBottom:16, display: "flex", justifyContent: "center", alignItems: "center", gap: 10}}>
             <SmileyIcon size={80} />
+            {refCount > 0 && (
+              <div style={{ background: "#1E293B", padding: 12, borderRadius: "50%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
+                <span style={{ fontSize: 30 }}>{refRank.icon}</span>
+              </div>
+            )}
           </div>
           <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
-          <p style={{...S.sub, fontSize:16, marginBottom:24, fontWeight: 700, color: ORD}}>
-            Klaar om te ontdekken welk attest je dit jaar kunt verwachten? 🎓
-          </p>
+          <div style={{ display: "flex", justifyContent: "center", gap: 8, alignItems: "center", marginBottom: 24 }}>
+            <p style={{...S.sub, fontSize:15, fontWeight: 800, color: rank.color, margin: 0}}>
+              {rank.name}
+            </p>
+            {refCount > 0 && (
+              <div style={{ background: "#1E293B", color: "white", padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 800 }}>
+                {refRank.icon} {refRank.name}
+              </div>
+            )}
+          </div>
           
           <button style={S.btn} onClick={startNieuweAnalyse}>
             Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
@@ -1411,6 +1451,68 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           >
             Mijn Spel & Progressie 🎮
           </button>
+
+          {/* Referral Section */}
+          <div style={{ marginTop: 24, padding: 20, background: "#F8FAFC", borderRadius: 24, border: "1.5px solid #E2E8F0", textAlign: "left" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <div style={{ 
+                width: 40, height: 40, background: "#1E293B", borderRadius: "50%", 
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 
+              }}>
+                {refRank.icon}
+              </div>
+              <div>
+                <h3 style={{ fontSize: 15, fontWeight: 900, color: "#1E293B", margin: 0 }}>Bonus: Militaire Rang</h3>
+                <p style={{ fontSize: 11, color: "#64748B", margin: 0 }}>Je bent momenteel: <strong>{refRank.name}</strong></p>
+              </div>
+            </div>
+            
+            <p style={{ fontSize: 12, color: "#64748B", marginBottom: 14, lineHeight: 1.5 }}>
+              Nodig vrienden uit om te stijgen in rang. Elke nieuwe student die zich registreert via jouw link telt mee!
+            </p>
+            
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ 
+                flex: 1, 
+                background: "white", 
+                border: "1.5px solid #CBD5E1", 
+                borderRadius: 12, 
+                padding: "10px 14px", 
+                fontSize: 11, 
+                color: "#64748B", 
+                overflow: "hidden", 
+                whiteSpace: "nowrap", 
+                textOverflow: "ellipsis",
+                fontWeight: 600
+              }}>
+                {refLink}
+              </div>
+              <button 
+                onClick={copyLink}
+                style={{ 
+                  background: copied ? "#22C55E" : "#1E293B", 
+                  color: "white", 
+                  border: "none", 
+                  borderRadius: 12, 
+                  padding: "10px 16px", 
+                  fontSize: 12, 
+                  fontWeight: 800, 
+                  cursor: "pointer",
+                  transition: "all 0.2s",
+                  minWidth: 90
+                }}
+              >
+                {copied ? "Check! ✅" : "Kopieer"}
+              </button>
+            </div>
+
+            {refCount > 0 && (
+              <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, fontWeight: 800, background: "white", padding: "8px 12px", borderRadius: 10, border: "1px solid #E2E8F0" }}>
+                <span style={{ color: "#64748B" }}>Gerefereerde studenten:</span>
+                <span style={{ color: "#1E293B" }}>{refCount} studenten 🎓</span>
+              </div>
+            )}
+          </div>
           
           <Disclaimer mini />
         </div>
@@ -1420,6 +1522,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
   // ── 2. REGISTREREN ─────────────────────────────────────────
   const RegisterScreen = () => {
+    const { referralId } = useApp();
     const [naam,     setNaam]     = useState("");
     const [email,    setEmail]    = useState("");
     const [ww,       setWw]       = useState("");
@@ -1445,14 +1548,32 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         const cred = await createUserWithEmailAndPassword(auth, email, ww);
         const userPath = `users/${cred.user.uid}`;
         try {
-          await setDoc(doc(db, "users", cred.user.uid), { 
+          const userData: any = { 
             naam, 
             email,
             school: regSchool,
             jaar: regJaar,
             leeftijd: regLeeftijd,
-            richting: regRichting
-          });
+            richting: regRichting,
+            xp: 0,
+            rank: RANKS[0].name,
+            referralsCount: 0
+          };
+
+          if (referralId) {
+            userData.referredBy = referralId;
+            // Reward the referrer
+            try {
+              const referrerRef = doc(db, "users", referralId);
+              await updateDoc(referrerRef, {
+                referralsCount: increment(1)
+              });
+            } catch (e) {
+              console.warn("Could not increment referrer count", e);
+            }
+          }
+
+          await setDoc(doc(db, "users", cred.user.uid), userData);
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, userPath);
         }
@@ -1587,7 +1708,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   // ── 5. HOOFDVAKKEN ─────────────────────────────────────────
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
-    const toggle = (id: number) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
+    const toggle = (id: string) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
     const verder = async () => {
       try {
         if (currentUser?.uid) {
