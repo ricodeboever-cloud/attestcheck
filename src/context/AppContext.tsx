@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, getDocFromServer, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
 import { GoogleGenAI, Type } from "@google/genai";
-import { CONFIG, getRankInfo, RANKS, getReferralRankInfo } from '../constants';
+import { CONFIG, getRankInfo, RANKS } from '../constants';
 
 declare global {
   interface Window {
@@ -62,11 +62,6 @@ export interface UserProfile {
   xp?: number;
   rank?: string;
   focusPoints?: FocusPoint[];
-  referralsCount?: number;
-  referredBy?: string;
-  progression?: any[];
-  badges?: string[];
-  customBadges?: any[];
 }
 
 interface AppContextType {
@@ -131,58 +126,10 @@ interface AppContextType {
   isDemo: boolean;
   setIsDemo: (d: boolean) => void;
   startDemo: () => void;
-  referralId: string | null;
   loading: boolean;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -213,20 +160,98 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [feedbackSuccess, setFeedbackSuccess] = useState(false);
 
   const [isDemo, setIsDemo] = useState(false);
-  const [referralId, setReferralId] = useState<string | null>(null);
+  const [newBadge, setNewBadge] = useState<any>(null);
   const today = new Date().toISOString().split('T')[0];
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const ref = params.get('ref');
-    if (ref) {
-      setReferralId(ref);
-      sessionStorage.setItem('referralId', ref);
-    } else {
-      const stored = sessionStorage.getItem('referralId');
-      if (stored) setReferralId(stored);
+  const getApiKey = () => {
+    // @ts-ignore
+    return import.meta.env.VITE_GEMINI_API_KEY || 
+           (typeof process !== 'undefined' && (process.env.GEMINI_API_KEY || process.env.API_KEY)) || 
+           (window as any).API_KEY;
+  };
+
+  const checkApiKey = async () => {
+    try {
+      const currentKey = getApiKey();
+      if (window.aistudio) {
+        const selected = await window.aistudio.hasSelectedApiKey();
+        setHasApiKey(selected || !!currentKey);
+      } else {
+        setHasApiKey(!!currentKey);
+      }
+    } catch (e) {
+      console.error("Error checking API key:", e);
+      setHasApiKey(!!getApiKey());
     }
-  }, []);
+  };
+
+  const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
+    const models = [
+      "gemini-3-flash-preview",
+      "gemini-flash-latest",
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3.1-pro-preview"
+    ];
+
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      if (window.aistudio) {
+        await window.aistudio.openSelectKey();
+        setHasApiKey(true);
+      } else {
+        throw new Error("Geen API-sleutel geconfigureerd.");
+      }
+    }
+    
+    const ai = new GoogleGenAI({ apiKey: getApiKey() || "" });
+
+    for (const modelName of models) {
+      let attempts = 0;
+      while (attempts < retriesPerModel) {
+        try {
+          const response = await ai.models.generateContent({
+            ...params,
+            model: modelName,
+            config: {
+              ...params.config,
+              safetySettings: [
+                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+              ]
+            }
+          });
+          return response;
+        } catch (error: any) {
+          console.warn(`Fout bij model ${modelName}:`, error);
+          const msg = error?.message || "";
+          const status = error?.status;
+          
+          if (msg.includes("Requested entity was not found") && window.aistudio) {
+            setHasApiKey(false);
+            await window.aistudio.openSelectKey();
+            setHasApiKey(true);
+            attempts++;
+            continue;
+          }
+
+          if (msg.includes("quota") || msg.includes("429") || status === 429 || msg.includes("fetch") || msg.includes("500") || msg.includes("503")) {
+            if (attempts < retriesPerModel - 1) {
+              await new Promise(res => setTimeout(res, 1000));
+              attempts++;
+              continue;
+            } else {
+              break; 
+            }
+          }
+          throw error;
+        }
+      }
+    }
+    throw new Error("AI-modellen zijn momenteel niet beschikbaar. Probeer het over een minuutje opnieuw.");
+  };
 
   const startDemo = () => {
     setIsDemo(true);
@@ -240,7 +265,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       richting: "Wetenschappen",
       xp: 1250,
       rank: getRankInfo(1250).name,
-      referralsCount: 2,
       focusPoints: [
         { id: "fp_1", text: "Franse woordjes oefenen (Unit 4)", completed: false, xpValue: 20, createdAt: new Date().toISOString() },
         { id: "fp_2", text: "Wiskunde oefeningen over functies maken", completed: true, xpValue: 20, createdAt: new Date().toISOString() },
@@ -496,42 +520,52 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
     setCurrentUser(null);
   };
 
-  const checkApiKey = async () => {
-    if (window.aistudio) {
-      const ok = await window.aistudio.hasSelectedApiKey();
-      setHasApiKey(ok);
-    }
-  };
-
-  const getApiKey = () => {
-    return (process.env.API_KEY || process.env.GEMINI_API_KEY || "");
-  };
-
   useEffect(() => {
     checkApiKey();
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
-        const userPath = `users/${fbUser.uid}`;
         try {
           const snap = await getDoc(doc(db, "users", fbUser.uid));
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
-            setCurrentUser({ uid: fbUser.uid, ...data });
-            if (data.school) setSchool(data.school);
-            if (data.jaar) setJaar(data.jaar);
-            if (data.leeftijd) setLeeftijd(data.leeftijd);
-            if (data.richting) setRichting(data.richting);
-            if (data.vakken) setVakken(data.vakken);
-            if (data.gedragAntw) setGedragAntw(data.gedragAntw);
-            if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
-            if (data.score !== undefined) setScore(data.score);
-            if (data.progression) setProgression(data.progression);
+            let updatedData = { ...data };
+            
+            // Check for missing focus points
+            if (!data.focusPoints || data.focusPoints.length === 0) {
+              const defaultPoints = [
+                { id: "1", text: "Maak een planning voor je volgende toetsweek.", completed: false, xpValue: 10, category: "planning", createdAt: new Date().toISOString() },
+                { id: "2", text: "Stel een vraag in de les bij een vak dat moeilijk is.", completed: false, xpValue: 15, category: "inzet", createdAt: new Date().toISOString() },
+                { id: "3", text: "Zorg dat je al je huiswerk op tijd af hebt deze week.", completed: false, xpValue: 20, category: "consistentie", createdAt: new Date().toISOString() }
+              ];
+              updatedData.focusPoints = defaultPoints;
+              await setDoc(doc(db, "users", fbUser.uid), updatedData, { merge: true });
+            }
+
+            setCurrentUser({ uid: fbUser.uid, ...updatedData });
+            if (updatedData.school) setSchool(updatedData.school);
+            if (updatedData.jaar) setJaar(updatedData.jaar);
+            if (updatedData.leeftijd) setLeeftijd(updatedData.leeftijd);
+            if (updatedData.richting) setRichting(updatedData.richting);
+            if (updatedData.vakken) setVakken(updatedData.vakken);
+            if (updatedData.gedragAntw) setGedragAntw(updatedData.gedragAntw);
+            if (updatedData.nederlandsAntw) setNederlandsAntw(updatedData.nederlandsAntw);
+            if (updatedData.score !== undefined) setScore(updatedData.score);
           } else {
-            setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
+            const newUser: UserProfile = { 
+              uid: fbUser.uid, 
+              naam: fbUser.email?.split('@')[0] || "Gebruiker", 
+              email: fbUser.email || "",
+              xp: 0,
+              rank: RANKS[0].name,
+              focusPoints: [
+                { id: "1", text: "Voer je eerste rapport in!", completed: false, xpValue: 50, category: "onboarding", createdAt: new Date().toISOString() }
+              ]
+            };
+            await setDoc(doc(db, "users", fbUser.uid), newUser);
+            setCurrentUser(newUser);
           }
         } catch (error) {
-          console.error("Error fetching user profile, falling back to basic info:", error);
-          setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
+          console.error("Error loading user profile:", error);
         }
       } else {
         setCurrentUser(null);
@@ -574,7 +608,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       saveTodayScore,
       logout, checkApiKey, getApiKey,
       isDemo, setIsDemo, startDemo,
-      referralId,
       loading
     }}>
       {children}

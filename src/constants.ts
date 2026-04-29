@@ -1,52 +1,94 @@
 export const OR = "#F47920";
-export const ORL = "#FF9E5E";
-export const ORD = "#B45309";
-export const ORBG = "#FFF7ED";
-export const ORPL = "#FFEDD5";
+export const ORL = "#FF9F45";
+export const ORD = "#C85E10";
+export const ORBG = "#FFF5EC";
+export const ORPL = "#FFE4C4";
 
 export const CONFIG = {
   hoofdvakMultiplier: 3,
-  puntenGewicht: 0.88,
   gedragGewicht: 0.12,
+  puntenGewicht: 0.88,
   attestA_drempel: 70,
   attestB_drempel: 50,
   gedragsVragen: [
-    { id: "stipt", vraag: "Ben je altijd op tijd in de les?", icon: "⏰" },
-    { id: "huiswerk", vraag: "Maak je al je huiswerk en taken?", icon: "📚" },
-    { id: "inzet", vraag: "Toon je actieve inzet tijdens de les?", icon: "💪" },
-    { id: "respect", vraag: "Heb je respect voor leerkrachten en medeleerlingen?", icon: "🤝" }
+    { id: 1, vraag: "Hoe vaak kom ik op tijd naar school?",      emoji: "⏰" },
+    { id: 2, vraag: "Hoe goed maak ik mijn huiswerk?",           emoji: "📚" },
+    { id: 3, vraag: "Hoe goed gedraag ik mij in de klas?",       emoji: "😊" },
+    { id: 4, vraag: "Als iemand mij kritiek geeft, reageer ik meestal rustig en denk ik erover na.", emoji: "🤝" },
+    { id: 5, vraag: "Hoe regelmatig ben ik aanwezig op school?", emoji: "🏫" },
+    { id: 6, vraag: "Hoe goed luister ik naar de leerkracht?",   emoji: "👂" },
+  ],
+  antwoordOpties: [
+    { waarde: 1, label: "Nooit",        emoji: "😞" },
+    { waarde: 2, label: "Soms",         emoji: "😐" },
+    { waarde: 3, label: "Vaak",         emoji: "🙂" },
+    { waarde: 4, label: "Bijna altijd", emoji: "😄" },
+    { waarde: 5, label: "Altijd",       emoji: "🌟" },
   ],
   nederlandsVragen: [
-    { id: "begrijpen", vraag: "Begrijp je de uitleg van de leerkracht vlot?", opties: ["Altijd", "Meestal", "Soms", "Moeilijk"] },
-    { id: "spreken", vraag: "Durf je vlot spreken in de klas?", opties: ["Altijd", "Meestal", "Soms", "Moeilijk"] }
+    { id: "schrijven", vraag: "Kan ik vlot Nederlandse zinnen schrijven?", emoji: "✍️" },
+    { id: "spreken",   vraag: "Kan ik vlot Nederlandse zinnen spreken?",   emoji: "🗣️" },
+  ],
+  BADGES: [
+    { id: "first_step", name: "Eerste Stap 👣", description: "Voltooi je eerste focus punt.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 1 },
+    { id: "focus_fan", name: "Focus Fanaat 🎯", description: "Voltooi 5 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 5 },
+    { id: "consistency", name: "Consistentie Koning 👑", description: "Voltooi 10 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 10 },
+    { id: "focus_master", name: "Focus Meester 🏆", description: "Voltooi 25 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 25 },
+    { id: "focus_legend", name: "Focus Legende 🌌", description: "Voltooi 50 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 50 },
+    { id: "focus_god", name: "Focus God-mode ⚡", description: "Voltooi 100 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 100 },
+    { id: "veteran", name: "Rapport Radar Veteraan 🎖️", description: "Sla 3 verschillende scores op.", requirement: (user: any, progression: any[]) => (progression?.length || 0) >= 3 },
+    { id: "rising_star", name: "Stijgende Lijn 📈", description: "Heb een stijgende trend in je progressie.", requirement: (user: any, progression: any[]) => {
+      if (!progression || progression.length < 2) return false;
+      return progression[progression.length - 1].score > progression[0].score;
+    }},
+    { id: "math_wizard", name: "Wiskunde Wonder 🔢", description: "Behaal meer dan 85% op Wiskunde.", requirement: (user: any) => user.vakken?.some((v: any) => v.naam.toLowerCase().includes('wiskunde') && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
+    { id: "language_hero", name: "Talenknobbel 🗣️", description: "Behaal een topscore op een taalvak (NL, FR of ENG).", requirement: (user: any) => user.vakken?.some((v: any) => (v.naam.toLowerCase().includes('frans') || v.naam.toLowerCase().includes('engels') || v.naam.toLowerCase().includes('nederlands')) && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
+    { id: "behavior_star", name: "Modelstudent ✨", description: "Scoor maximaal op al je gedragsvragen.", requirement: (user: any) => Object.keys(user.gedragAntw || {}).length >= 5 && Object.values(user.gedragAntw || {}).every(v => v === 5) },
+    { id: "perfectionist", name: "Perfectionist 💎", description: "Behaal een totale score van meer dan 90%.", requirement: (user: any) => (user.score || 0) >= 90 },
+    { id: "comeback_kid", name: "Comeback Kid 🔝", description: "Verbeter je score met meer dan 10% in één meting.", requirement: (user: any, progression: any[]) => {
+      if (!progression || progression.length < 2) return false;
+      return (progression[progression.length - 1].score - progression[progression.length - 2].score) >= 10;
+    }},
+    { id: "heavy_lifter", name: "Zware Lader 🏋️", description: "Behaal meer dan 75% op al je hoofdvakken.", requirement: (user: any) => {
+      const hoofdvakken = user.vakken?.filter((v: any) => v.isHoofdvak);
+      return hoofdvakken && hoofdvakken.length > 0 && hoofdvakken.every((v: any) => (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.75);
+    }},
+    { id: "early_bird", name: "Vroege Vogel 🐦", description: "Voer een analyse uit voor 8u 's ochtends.", requirement: () => new Date().getHours() < 8 },
   ]
 };
 
 export const RANKS = [
-  { min: 0, name: "Nieuweling 🐣", color: "#94A3B8" },
-  { min: 100, name: "Groeier 🌱", color: "#22C55E" },
-  { min: 300, name: "Strijder ⚔️", color: "#3B82F6" },
-  { min: 600, name: "Expert 🎓", color: "#8B5CF6" },
-  { min: 1000, name: "Legende 👑", color: "#F59E0B" }
+  { min: 0,      name: "Starter 🔰", color: "#94A3B8" },
+  { min: 50,     name: "Nieuwkomer ✨", color: "#CBD5E1" },
+  { min: 100,    name: "Groeier 🌱", color: "#22C55E" },
+  { min: 150,    name: "Verkenner  Telescope", color: "#4ADE80" },
+  { min: 200,    name: "Doorzetter 🏃", color: "#86EFAC" },
+  { min: 250,    name: "Ontdekker 🗺️", color: "#3B82F6" },
+  { min: 300,    name: "Strijder 💪", color: "#60A5FA" },
+  { min: 400,    name: "Klimmer 🧗", color: "#93C5FD" },
+  { min: 500,    name: "Talent 🌟", color: "#FACC15" },
+  { min: 600,    name: "Expert 🎓", color: "#A855F7" },
+  { min: 700,    name: "Specialist 🧪", color: "#C084FC" },
+  { min: 800,    name: "Gevorderde 🚀", color: "#E879F9" },
+  { min: 900,    name: "Prof 👨‍🏫", color: "#F472B6" },
+  { min: 1000,   name: "Meester 🏆", color: "#F59E0B" },
+  { min: 1500,   name: "Mentor 🧠", color: "#D946EF" },
+  { min: 2000,   name: "Elite 💎", color: "#EF4444" },
+  { min: 3000,   name: "Legende 🛡️", color: "#FB923C" },
+  { min: 5000,   name: "Kampioen 🥇", color: "#F97316" },
+  { min: 7500,   name: "Grootmeester 🏛️", color: "#EA580C" },
+  { min: 10000,  name: "Fenomeen 🎇", color: "#C026D3" },
+  { min: 15000,  name: "Titan ⚡", color: "#4F46E5" },
+  { min: 20000,  name: "Oracle 👁️", color: "#7C3AED" },
+  { min: 30000,  name: "Overlord 👑", color: "#9333EA" },
+  { min: 45000,  name: "Demi-God 🌪️", color: "#DB2777" },
+  { min: 60000,  name: "Alwetende ♾️", color: "#E11D48" },
+  { min: 80000,  name: "Universeel Genie 🌌", color: "#F43F5E" },
+  { min: 100000, name: "Oneindige Wijsheid 🏮", color: "#FF0000" },
 ];
 
 export const getRankInfo = (xp: number) => {
   return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
-};
-
-export const REFERRAL_RANKS = [
-  { min: 0, name: "Rekruut", icon: "🔰" },
-  { min: 1, name: "Soldaat", icon: "🎖️" },
-  { min: 3, name: "Korporaal", icon: "🔱" },
-  { min: 5, name: "Sergeant", icon: "⚜️" },
-  { min: 10, name: "Luitenant", icon: "⚔️" },
-  { min: 20, name: "Kapitein", icon: "🦅" },
-  { min: 50, name: "Majoor", icon: "🛡️" },
-  { min: 100, name: "Generaal", icon: "👑" },
-];
-
-export const getReferralRankInfo = (referrals: number) => {
-  return [...REFERRAL_RANKS].reverse().find(r => referrals >= r.min) || REFERRAL_RANKS[0];
 };
 
 export const S: any = {
@@ -117,3 +159,4 @@ export const S: any = {
     boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
   },
 };
+

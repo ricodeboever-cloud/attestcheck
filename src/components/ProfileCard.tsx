@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { useApp } from '../context/AppContext';
-import { OR, ORL, ORBG, ORPL, S, RANKS, getRankInfo, getReferralRankInfo } from '../constants';
+import { OR, ORL, ORBG, ORPL, S, RANKS, getRankInfo } from '../constants';
 
 const ProfileCard: React.FC = () => {
   const { currentUser, showProfile, setShowProfile, progression } = useApp();
@@ -12,9 +12,6 @@ const ProfileCard: React.FC = () => {
   const rank = getRankInfo(xp);
   const nextRank = RANKS.find(r => r.min > xp);
   const progress = nextRank ? ((xp - rank.min) / (nextRank.min - rank.min)) * 100 : 100;
-
-  const referralCount = currentUser.referralsCount || 0;
-  const refRank = getReferralRankInfo(referralCount);
 
   return (
     <div style={{
@@ -33,26 +30,11 @@ const ProfileCard: React.FC = () => {
           onClick={() => setShowProfile(false)}
         >✕</button>
 
-        <div style={{ fontSize: 64, marginBottom: 16, display: "flex", justifyContent: "center", alignItems: "center", gap: 10 }}>
-          <span>{rank.name.split(' ')[1]}</span>
-          {referralCount > 0 && (
-            <span style={{ fontSize: 32, background: "#1E293B", padding: "8px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "white" }}>
-              {refRank.icon}
-            </span>
-          )}
-        </div>
-        
+        <div style={{ fontSize: 64, marginBottom: 16 }}>{rank.name.split(' ')[1]}</div>
         <h2 style={S.h2}>{currentUser.naam}</h2>
-        <div style={{ display: "flex", justifyContent: "center", gap: 8, alignItems: "center", marginBottom: 20 }}>
-          <p style={{...S.sub, fontWeight: 800, color: rank.color, fontSize: 16, margin: 0 }}>
-            {rank.name}
-          </p>
-          {referralCount > 0 && (
-            <div style={{ background: "#1E293B", color: "white", padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", gap: 4 }}>
-              {refRank.icon} {refRank.name}
-            </div>
-          )}
-        </div>
+        <p style={{...S.sub, fontWeight: 800, color: rank.color, fontSize: 16, marginBottom: 20 }}>
+          {rank.name}
+        </p>
 
         <div style={{ background: ORBG, borderRadius: 20, padding: 20, marginBottom: 20 }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 14, fontWeight: 800 }}>

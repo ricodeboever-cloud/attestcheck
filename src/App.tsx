@@ -13,9 +13,7 @@ import {
   getDocFromServer,
   collection,
   addDoc,
-  serverTimestamp,
-  updateDoc,
-  increment
+  serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -40,8 +38,10 @@ import SmileyIcon from "./components/SmileyIcon";
 import FeedbackModal from "./components/FeedbackModal";
 import SettingsModal from "./components/SettingsModal";
 import ProfileCard from "./components/ProfileCard";
-import { useApp, Vak } from "./context/AppContext";
-import { getReferralRankInfo } from "./constants";
+import { 
+  OR, ORL, ORD, ORBG, ORPL, CONFIG, S, getRankInfo, RANKS 
+} from "./constants";
+import { useApp, FeedbackData } from "./context/AppContext";
 
 declare global {
   interface Window {
@@ -230,59 +230,38 @@ const ORPL = "#FFE4C4";
 
 function AttestatieApp() {
   const { 
-    currentUser, 
-    setCurrentUser, 
-    school, 
-    setSchool, 
-    jaar, 
-    setJaar, 
-    leeftijd, 
-    setLeeftijd, 
-    richting, 
-    setRichting, 
-    vakken, 
-    setVakken, 
-    gedragAntw, 
-    setGedragAntw, 
-    nederlandsAntw, 
-    setNederlandsAntw, 
-    score, 
-    setScore, 
-    fbData, 
-    setFbData, 
-    fbLoad, 
-    setFbLoad, 
-    fbError, 
-    setFbError, 
-    reportImage, 
-    setReportImage, 
-    progression, 
-    setProgression, 
-    saveSuccess, 
-    setSaveSuccess, 
-    hasApiKey, 
-    setHasApiKey, 
-    selectedAttest, 
-    setSelectedAttest,
-    setShowFeedback, 
-    setShowSettings, 
-    setShowProfile, 
-    isDemo, 
-    setIsDemo, 
-    startDemo,
-    loading: contextLoading
+    currentUser, setCurrentUser,
+    school, setSchool,
+    jaar, setJaar,
+    leeftijd, setLeeftijd,
+    richting, setRichting,
+    vakken, setVakken,
+    gedragAntw, setGedragAntw,
+    nederlandsAntw, setNederlandsAntw,
+    score, setScore,
+    fbData, setFbData,
+    fbLoad, setFbLoad,
+    fbError, setFbError,
+    reportImage, setReportImage,
+    progression, setProgression,
+    saveSuccess, setSaveSuccess,
+    hasApiKey, setHasApiKey,
+    selectedAttest, setSelectedAttest,
+    setShowFeedback, setShowSettings, setShowProfile, 
+    isDemo, setIsDemo, startDemo,
+    vraagFeedback, saveTodayScore, logout, checkApiKey, getApiKey
   } = useApp();
+  
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [screen,        setScreen]       = useState("loading");
   
-  // Grades Screen State (Elevated to prevent remount reset)
+  // Grades Screen State (Elevated for OCR stability)
   const [grades_lv, setGrades_lv] = useState<any[]>([]);
   const [grades_nv, setGrades_nv] = useState("");
   const [grades_ocrMsg, setGrades_ocrMsg] = useState("");
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [progressionLoading, setProgressionLoading] = useState(false);
   const [newBadge,       setNewBadge]      = useState<any>(null);
 
   // ── PRIVACY MODAL ──────────────────────────────────────────
@@ -456,29 +435,8 @@ function AttestatieApp() {
     }
   };
 
-  const saveTodayScore = async () => {
-    if (!currentUser || score === null) return;
-    const today = new Date().toISOString().split('T')[0];
-    try {
-      const path = `users/${currentUser.uid}/progression`;
-      await setDoc(doc(db, path, today), {
-        userId: currentUser.uid,
-        score: score,
-        date: today,
-        timestamp: serverTimestamp()
-      });
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      const { getDocs, query, orderBy } = await import("firebase/firestore");
-      const q = query(collection(db, path), orderBy("date", "asc"));
-      const snap = await getDocs(q);
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProgression(data);
-      checkBadges(currentUser, data);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/progression/${today}`);
-    }
-  };
+  // ── SAVE SCORE ───────────────────────────────────────────
+  // Managed by AppContext via useApp()
 
   const deleteProgressionPoint = async (date: string) => {
     if (!currentUser) return;
@@ -526,22 +484,8 @@ function AttestatieApp() {
     return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
   };
 
-  const addXP = async (amount: number) => {
-    if (!currentUser) return;
-    const newXP = (currentUser.xp || 0) + amount;
-    const newRank = getRankInfo(newXP).name;
-    
-    try {
-      await setDoc(doc(db, "users", currentUser.uid), {
-        ...currentUser,
-        xp: newXP,
-        rank: newRank
-      });
-      setCurrentUser({ ...currentUser, xp: newXP, rank: newRank });
-    } catch (error) {
-      console.error("Error updating XP:", error);
-    }
-  };
+  // ── XP & RANKS ─────────────────────────────────────────────
+  // Managed by AppContext via useApp()
 
   const toggleFocusPoint = async (pointId: string) => {
     if (!currentUser) return;
@@ -573,10 +517,16 @@ function AttestatieApp() {
   };
 
   useEffect(() => {
-    if (currentUser && screen === "progression") {
-      fetchProgression();
+    if (currentUser) {
+      if (currentUser.school && currentUser.jaar && currentUser.leeftijd && currentUser.richting) {
+        setScreen("dashboard");
+      } else {
+        setScreen("dashboard");
+      }
+    } else {
+      setScreen("welcome");
     }
-  }, [currentUser, screen]);
+  }, [currentUser]);
 
   const calculatePrognosis = (data: any[]) => {
     if (data.length < 2) return null;
@@ -665,27 +615,8 @@ function AttestatieApp() {
     return cleaned;
   };
 
-  const getApiKey = () => {
-    // @ts-ignore
-    return import.meta.env.VITE_GEMINI_API_KEY || 
-           (typeof process !== 'undefined' && (process.env.GEMINI_API_KEY || process.env.API_KEY)) || 
-           (window as any).API_KEY;
-  };
-
-  const checkApiKey = async () => {
-    try {
-      const currentKey = getApiKey();
-      if (window.aistudio) {
-        const selected = await window.aistudio.hasSelectedApiKey();
-        setHasApiKey(selected || !!currentKey);
-      } else {
-        setHasApiKey(!!currentKey);
-      }
-    } catch (e) {
-      console.error("Error checking API key:", e);
-      setHasApiKey(!!getApiKey());
-    }
-  };
+  // ── API KEY & FEEDBACK ────────────────────────────────────
+  // Managed by AppContext via useApp()
 
   /**
    * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
@@ -789,7 +720,7 @@ function AttestatieApp() {
         await window.aistudio.openSelectKey();
         console.log("Sleutel selectie venster geopend.");
         setHasApiKey(true);
-        setFbError(""); // Wis foutmelding zodat gebruiker opnieuw kan proberen
+        setFbError(""); 
       } catch (err) {
         console.error("Fout bij openen sleutel-venster:", err);
         setFbError("Kon het venster niet openen. Probeer de pagina te verversen.");
@@ -799,174 +730,8 @@ function AttestatieApp() {
     }
   };
 
-  const vraagFeedback = async () => {
-    if (score === null) return;
-    setFbLoad(true);
-    setFbError("");
-    try {
-      const ingevuld = vakken.filter(v=>v.punt!==""&&!isNaN(parseFloat(v.punt)));
-      const vakInfo = ingevuld.map(v=>{
-        const p=Math.round((parseFloat(v.punt)/parseFloat(v.maxPunt))*100);
-        return `${v.naam}${v.isHoofdvak?" (HOOFDVAK ⭐)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
-      }).join(", ");
-      const gedragInfo = CONFIG.gedragsVragen.map(v=>
-        gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
-      ).filter(Boolean).join("; ");
-
-      const nedInfo = CONFIG.nederlandsVragen.map(v=>
-        nederlandsAntw[v.id]?`${v.vraag}: ${nederlandsAntw[v.id]}`:""
-      ).filter(Boolean).join("; ");
-
-      const attest = getAttest(score);
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setHasApiKey(false);
-        throw new Error("Gemini API key is niet geconfigureerd.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-
-      const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
-Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
-Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
-
-Context:
-- Punten tellen voor 88%, gedrag voor 12%.
-- Hoofdvakken (⭐) tellen 3x zwaarder.
-- Nederlands niveau (impact +/- 3%): ${nedInfo}
-- Vakken: ${vakInfo}
-- Gedrag: ${gedragInfo}
-
-Terminologie-hulp:
-- Attest A: Geslaagd. Attest B: Geslaagd, maar met uitsluiting van bepaalde richtingen. Attest C: Niet geslaagd.
-
-Geef uitvoerige maar hapklare feedback in JSON formaat.
-Bepaal welk attest (A, B of C) de student momenteel zou krijgen.
-Geef voor ELK van de drie attesten (A, B en C) een analyse:
-1. status: 'behaald' (huidig), 'mogelijk' (verbetering), 'gevaar' (verslechtering).
-2. title: Pakkende titel.
-3. description: Wat betekent dit specifiek voor deze student?
-4. actionPlan: 3-4 concrete stappen om dit te bereiken/behouden.
-5. consequences: Gevolgen van dit attest.
-6. emoji: Passende emoji.
-Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
-Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse doelen (max 10 woorden per doel) die de student zelf kan afvinken. Zorg dat deze doelen AFWIJKEN van vorige doelen als je die ziet in de context (bijv. 'Elke dag 15 min woordjes Frans leren', 'Vraag extra uitleg voor Wiskunde', etc.).`;
-
-      const contents: any[] = [{ text: prompt }];
-      if (reportImage) {
-        contents.push({
-          inlineData: {
-            mimeType: "image/jpeg",
-            data: reportImage
-          }
-        });
-      }
-
-      const response = await callGeminiWithFallback({
-        contents: { parts: contents },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-              attests: {
-                type: Type.OBJECT,
-                properties: {
-                  A: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  B: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  C: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  }
-                },
-                required: ["A", "B", "C"]
-              },
-              motivation: { type: Type.STRING },
-              focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-          }
-        }
-      });
-      
-      const text = response.text;
-      if (!text) throw new Error("Geen tekst ontvangen van de coach.");
-      
-      const data = JSON.parse(cleanJSON(text)) as FeedbackData;
-      if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
-      
-      // Focus points omzetten naar objecten voor de checklist en toevoegen aan bestaande (niet-voltooide) lijst
-      if (data.focusPoints && currentUser) {
-        const newFocusPoints: FocusPoint[] = data.focusPoints.map((text, i) => ({
-          id: `fp_${Date.now()}_${i}`,
-          text,
-          completed: false,
-          xpValue: 20 + Math.floor(Math.random() * 11), // Variabele XP tussen 20 en 30
-          createdAt: new Date().toISOString()
-        }));
-        
-        // Behoud oude focuspunten die nog niet voltooid zijn, maar voeg de nieuwe toe bovenaan
-        const updatedFocusPoints = [...newFocusPoints, ...(currentUser.focusPoints || []).filter((p: any) => !p.completed)];
-        
-        // Opslaan in Firestore
-        const updatedXP = (currentUser.xp || 0) + 50;
-        const userData = cleanUserForFirestore({
-          ...currentUser,
-          focusPoints: updatedFocusPoints,
-          xp: updatedXP,
-          rank: getRankInfo(updatedXP).name
-        });
-
-        await setDoc(doc(db, "users", currentUser.uid), userData);
-        setCurrentUser(userData);
-      }
-
-      setFbData(data);
-      setSelectedAttest(data.predictedAttest);
-    } catch (error: any) {
-      console.error("AI Feedback Error:", error);
-      let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
-      if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
-        msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
-        setHasApiKey(false); // Forceer de knop om te verschijnen
-      } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
-        msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
-      }
-      setFbError(msg);
-    }
-    setFbLoad(false);
-  };
+  // ── ANALYSIS ──────────────────────────────────────────────
+  // Managed by AppContext via useApp()
 
   // ── Font laden + Firebase auth listener ────────────────────
   useEffect(() => {
@@ -989,19 +754,47 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
       }
     }
     testConnection();
-  }, []);
 
-  useEffect(() => {
-    if (!contextLoading) {
-      if (currentUser) {
-        setScreen("dashboard");
+    // Luister naar login/logout events van Firebase
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        try {
+          const snap = await getDoc(doc(db, "users", fbUser.uid));
+          if (snap.exists()) {
+            const data = snap.data();
+            setCurrentUser({ uid: fbUser.uid, ...data });
+            if (data.school)   setSchool(data.school);
+            if (data.jaar)     setJaar(data.jaar);
+            if (data.leeftijd) setLeeftijd(data.leeftijd);
+            if (data.richting) setRichting(data.richting);
+            if (data.vakken)   setVakken(data.vakken);
+            if (data.gedragAntw) setGedragAntw(data.gedragAntw);
+            if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
+            if (data.score !== undefined) setScore(data.score);
+            
+            // Skip onboarding if profile is complete
+            if (data.school && data.jaar && data.leeftijd && data.richting) {
+              setScreen("dashboard");
+            } else {
+              setScreen("dashboard"); // Always go to dashboard if logged in, profile can be set in settings
+            }
+          } else {
+            setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
+            setScreen("dashboard");
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${fbUser.uid}`);
+          setScreen("dashboard");
+        }
       } else {
+        setCurrentUser(null);
         setScreen("welcome");
       }
-    }
-  }, [currentUser, contextLoading]);
+    });
+    return () => unsub();
+  }, []);
 
-  // ── Score berekening ───────────────────────────────────────
+  // ── CORE HELPERS ───────────────────────────────────────────
   const berekenScore = (vakkenData: any[], antwoorden: any, nedAntw: any) => {
     const ingevuld = vakkenData.filter(v => v.punt !== "" && !isNaN(parseFloat(v.punt)));
     if (!ingevuld.length) return 0;
@@ -1021,7 +814,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
     
     let baseScore = (puntScore * CONFIG.puntenGewicht + gedragScore * CONFIG.gedragGewicht);
     
-    // Nederlands impact: +/- 1.5% per vraag (totaal +/- 3%)
     if (nedAntw.schrijven === "ja") baseScore += 1.5; else if (nedAntw.schrijven === "nee") baseScore -= 1.5;
     if (nedAntw.spreken === "ja")   baseScore += 1.5; else if (nedAntw.spreken === "nee")   baseScore -= 1.5;
 
@@ -1034,74 +826,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
     return { label:"Attest C", kleur:"#EF4444", emoji:"📌", tekst:"Je slaagt momenteel niet. Je zal dit jaar moeten overdoen of van richting veranderen." };
   };
 
-  const S: any = {
-    page: {
-      fontFamily: "'Nunito','Arial Rounded MT Bold',sans-serif",
-      minHeight:"100vh",
-      background:`linear-gradient(150deg,${ORBG} 0%,#FFFBF5 50%,${ORPL} 100%)`,
-      display:"flex", flexDirection:"column", alignItems:"center",
-      padding:0, position:"relative", overflowX:"hidden",
-    },
-    wrap: { 
-      width:"100%", 
-      maxWidth:460, 
-      padding:"env(safe-area-inset-top, 16px) 16px calc(env(safe-area-inset-bottom, 16px) + 48px)", 
-      position:"relative", 
-      zIndex: 1,
-      boxSizing: "border-box"
-    },
-    card: { 
-      background:"white", 
-      borderRadius:28, 
-      padding:"28px 24px", 
-      boxShadow:`0 12px 40px rgba(244,121,32,.12)`, 
-      marginBottom:20,
-      border: "1px solid rgba(244,121,32,.05)"
-    },
-    btn: {
-      width:"100%", padding:"18px", background:`linear-gradient(135deg,${OR},${ORL})`,
-      color:"white", border:"none", borderRadius:20, fontSize:18, fontWeight:800,
-      fontFamily:"inherit", cursor:"pointer", boxShadow:`0 8px 24px ${OR}44`,
-      marginBottom:14, display:"block", textAlign:"center", letterSpacing:".4px", transition:"all .2s",
-      userSelect: "none",
-      WebkitTapHighlightColor: "transparent",
-    },
-    btnSec: {
-      width:"100%", padding:"16px", background:"white", color:OR,
-      border:`2px solid ${OR}`, borderRadius:20, fontSize:16, fontWeight:800,
-      fontFamily:"inherit", cursor:"pointer", marginBottom:14, display:"block", textAlign:"center",
-      transition: "all .2s",
-      userSelect: "none",
-      WebkitTapHighlightColor: "transparent",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.05)"
-    },
-    input: {
-      width:"100%", padding:"15px 18px", border:`2px solid ${ORPL}`,
-      borderRadius:16, fontSize:16, fontFamily:"inherit", outline:"none",
-      marginBottom:14, boxSizing:"border-box", color:"#2D1B00", background:"#FAFAFA", transition:"all .2s",
-    },
-    lbl:  { fontSize:13, fontWeight:700, color:ORD, marginBottom:5, display:"block" },
-    h2:   { fontSize:21, fontWeight:800, color:"#2D1B00", margin:"0 0 6px" },
-    sub:  { fontSize:13, color:"#8B6242", lineHeight:1.5 },
-    err:  { background:"#FEE2E2", color:"#DC2626", padding:"10px 14px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:12 },
-    ok:   { background:"#DCFCE7", color:"#15803D", padding:"10px 14px", borderRadius:10, fontSize:13, fontWeight:600, marginBottom:12 },
-    back: { 
-      background:"white", 
-      border:`2px solid ${OR}`, 
-      fontSize:14, 
-      cursor:"pointer", 
-      marginBottom:16, 
-      color:OR, 
-      fontFamily:"inherit", 
-      fontWeight:800, 
-      padding:"10px 20px",
-      borderRadius:16,
-      display:"inline-flex",
-      alignItems:"center",
-      gap:8,
-      boxShadow: "0 4px 12px rgba(0,0,0,0.08)"
-    },
-  };
 
   const Blobs = () => (
     <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:0}}>
@@ -1338,53 +1062,38 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const WelcomeScreen = () => {
     return (
       <div style={{textAlign:"center",paddingTop:60}}>
-        <div style={{marginBottom:18}}>
-          <SmileyIcon size={90} />
+        <div style={{marginBottom:12}}>
+          <SmileyIcon size={80} />
         </div>
         <h1 style={{fontSize:42,fontWeight:900,color:OR,margin:"0 0 10px",letterSpacing:"-1px"}}>RapportRadar</h1>
         <p style={{...S.sub,fontSize:18,marginBottom:40,lineHeight:1.4,fontWeight:800,color:"#2D1B00"}}>
           Welk attest haal jij? <br/>
           <span style={{color:"#8B6242",fontSize:16,fontWeight:500}}>Krijg direct een slimme voorspelling van je schoolresultaten. 🎓</span>
         </p>
-
-        <div style={{
-          background: "white",
-          padding: 24,
-          borderRadius: 24,
-          boxShadow: "0 10px 30px rgba(0,0,0,0.05)",
-          border: `2px solid ${ORPL}`,
-          marginBottom: 30,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
-          position: "relative",
-          overflow: "hidden"
-        }}>
-          <div style={{position:"absolute", top:0, left:0, right:0, height:4, background:OR}}></div>
-          <h2 style={{...S.h2, fontSize: 18, marginBottom: 4, color: OR}}>Direct Proberen? 🚀</h2>
-          <p style={{...S.sub, fontSize: 13, marginBottom: 12}}>
-            Ontdek RapportRadar zonder account via onze interactieve demo.
-          </p>
+        <button style={S.btn} onClick={()=>setScreen("register")}>🌟 Nieuw account aanmaken</button>
+        <button style={S.btnSec} onClick={()=>setScreen("login")}>Ik heb al een account</button>
+        
+        <div style={{marginTop: 24, display: "flex", flexDirection: "column", gap: 12, alignItems: "center"}}>
           <button 
-            style={{...S.btn, margin: 0, background: OR, boxShadow: `0 8px 20px ${OR}44` }} 
+            style={{...S.btnSec, border: `2px dashed ${OR}`, background: `${OR}08`}} 
             onClick={() => {
               startDemo();
               setScreen("dashboard");
             }}
           >
-            Bekijk de Demo Loop ✨
+            🚀 Bekijk de Demo (Direct proberen)
+          </button>
+          
+          <button 
+            style={{background: "transparent", border: "none", color: "#8B6242", textDecoration: "underline", fontSize: 13, cursor: "pointer"}} 
+            onClick={() => {
+              setTutorialStep(0);
+              setShowTutorial(true);
+            }}
+          >
+            Hoe werkt het precies? ❓
           </button>
         </div>
-        
-        <div style={{display: "flex", flexDirection: "column", gap: 12}}>
-          <button style={{...S.btnSec, border: "2px solid #E2E8F0"}} onClick={()=>setScreen("register")}>
-            🌟 Maak gratis account
-          </button>
-          <button style={{...S.btnSec, border: "none", background: "transparent"}} onClick={()=>setScreen("login")}>
-            Ik heb al een account
-          </button>
-        </div>
-        
         <Disclaimer />
       </div>
     );
@@ -1394,19 +1103,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const DashboardScreen = () => {
     const xp = currentUser?.xp || 0;
     const rank = getRankInfo(xp);
-    const [copied, setCopied] = useState(false);
-
-    const refCount = currentUser?.referralsCount || 0;
-    const refRank = getReferralRankInfo(refCount);
-    
-    // Construct referral link
-    const refLink = `${window.location.origin}${window.location.pathname}?ref=${currentUser?.uid}`;
-
-    const copyLink = () => {
-      navigator.clipboard.writeText(refLink);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    };
 
     const startNieuweAnalyse = () => {
       setVakken([]);
@@ -1421,25 +1117,13 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     return (
       <div style={{paddingTop:10}}>
         <div style={{...S.card, textAlign:"center", padding:30}}>
-          <div style={{marginBottom:16, display: "flex", justifyContent: "center", alignItems: "center", gap: 10}}>
+          <div style={{marginBottom:16}}>
             <SmileyIcon size={80} />
-            {refCount > 0 && (
-              <div style={{ background: "#1E293B", padding: 12, borderRadius: "50%", boxShadow: "0 4px 12px rgba(0,0,0,0.15)" }}>
-                <span style={{ fontSize: 30 }}>{refRank.icon}</span>
-              </div>
-            )}
           </div>
           <h1 style={S.h2}>Welkom terug, {currentUser?.naam}!</h1>
-          <div style={{ display: "flex", justifyContent: "center", gap: 8, alignItems: "center", marginBottom: 24 }}>
-            <p style={{...S.sub, fontSize:15, fontWeight: 800, color: rank.color, margin: 0}}>
-              {rank.name}
-            </p>
-            {refCount > 0 && (
-              <div style={{ background: "#1E293B", color: "white", padding: "3px 8px", borderRadius: 6, fontSize: 10, fontWeight: 800 }}>
-                {refRank.icon} {refRank.name}
-              </div>
-            )}
-          </div>
+          <p style={{...S.sub, fontSize:16, marginBottom:24, fontWeight: 700, color: ORD}}>
+            Klaar om te ontdekken welk attest je dit jaar kunt verwachten? 🎓
+          </p>
           
           <button style={S.btn} onClick={startNieuweAnalyse}>
             Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
@@ -1451,68 +1135,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           >
             Mijn Spel & Progressie 🎮
           </button>
-
-          {/* Referral Section */}
-          <div style={{ marginTop: 24, padding: 20, background: "#F8FAFC", borderRadius: 24, border: "1.5px solid #E2E8F0", textAlign: "left" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <div style={{ 
-                width: 40, height: 40, background: "#1E293B", borderRadius: "50%", 
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 
-              }}>
-                {refRank.icon}
-              </div>
-              <div>
-                <h3 style={{ fontSize: 15, fontWeight: 900, color: "#1E293B", margin: 0 }}>Bonus: Militaire Rang</h3>
-                <p style={{ fontSize: 11, color: "#64748B", margin: 0 }}>Je bent momenteel: <strong>{refRank.name}</strong></p>
-              </div>
-            </div>
-            
-            <p style={{ fontSize: 12, color: "#64748B", marginBottom: 14, lineHeight: 1.5 }}>
-              Nodig vrienden uit om te stijgen in rang. Elke nieuwe student die zich registreert via jouw link telt mee!
-            </p>
-            
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <div style={{ 
-                flex: 1, 
-                background: "white", 
-                border: "1.5px solid #CBD5E1", 
-                borderRadius: 12, 
-                padding: "10px 14px", 
-                fontSize: 11, 
-                color: "#64748B", 
-                overflow: "hidden", 
-                whiteSpace: "nowrap", 
-                textOverflow: "ellipsis",
-                fontWeight: 600
-              }}>
-                {refLink}
-              </div>
-              <button 
-                onClick={copyLink}
-                style={{ 
-                  background: copied ? "#22C55E" : "#1E293B", 
-                  color: "white", 
-                  border: "none", 
-                  borderRadius: 12, 
-                  padding: "10px 16px", 
-                  fontSize: 12, 
-                  fontWeight: 800, 
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                  minWidth: 90
-                }}
-              >
-                {copied ? "Check! ✅" : "Kopieer"}
-              </button>
-            </div>
-
-            {refCount > 0 && (
-              <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 11, fontWeight: 800, background: "white", padding: "8px 12px", borderRadius: 10, border: "1px solid #E2E8F0" }}>
-                <span style={{ color: "#64748B" }}>Gerefereerde studenten:</span>
-                <span style={{ color: "#1E293B" }}>{refCount} studenten 🎓</span>
-              </div>
-            )}
-          </div>
           
           <Disclaimer mini />
         </div>
@@ -1522,7 +1144,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
   // ── 2. REGISTREREN ─────────────────────────────────────────
   const RegisterScreen = () => {
-    const { referralId } = useApp();
     const [naam,     setNaam]     = useState("");
     const [email,    setEmail]    = useState("");
     const [ww,       setWw]       = useState("");
@@ -1548,32 +1169,14 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         const cred = await createUserWithEmailAndPassword(auth, email, ww);
         const userPath = `users/${cred.user.uid}`;
         try {
-          const userData: any = { 
+          await setDoc(doc(db, "users", cred.user.uid), { 
             naam, 
             email,
             school: regSchool,
             jaar: regJaar,
             leeftijd: regLeeftijd,
-            richting: regRichting,
-            xp: 0,
-            rank: RANKS[0].name,
-            referralsCount: 0
-          };
-
-          if (referralId) {
-            userData.referredBy = referralId;
-            // Reward the referrer
-            try {
-              const referrerRef = doc(db, "users", referralId);
-              await updateDoc(referrerRef, {
-                referralsCount: increment(1)
-              });
-            } catch (e) {
-              console.warn("Could not increment referrer count", e);
-            }
-          }
-
-          await setDoc(doc(db, "users", cred.user.uid), userData);
+            richting: regRichting
+          });
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, userPath);
         }
@@ -1708,10 +1311,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   // ── 5. HOOFDVAKKEN ─────────────────────────────────────────
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
-    const toggle = (id: string | number) => {
-      const idStr = id.toString();
-      setLv(lv.map(v => v.id.toString() === idStr ? { ...v, isHoofdvak: !v.isHoofdvak } : v));
-    };
+    const toggle = (id: number) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
     const verder = async () => {
       try {
         if (currentUser?.uid) {
@@ -1788,20 +1388,14 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     const ocrLoading = grades_ocrLoading;
     const setOcrLoading = setGrades_ocrLoading;
 
-    const updateVak = (id: string | number, field: string, val: string) => {
-      const idStr = id.toString();
-      setLv(lv.map(v => v.id.toString() === idStr ? { ...v, [field]: val } : v));
-    };
+    const updateVak = (id: number, field: string, val: string) => setLv(lv.map(v=>v.id===id?{...v,[field]:val}:v));
 
     const voegToe = () => {
       if (!nv.trim()) return;
-      setLv([...lv, { id: Date.now().toString(), naam: nv.trim(), isHoofdvak: false, punt: "", maxPunt: "20" }]);
+      setLv([...lv, { id: Date.now(), naam: nv.trim(), isHoofdvak: false, punt: "", maxPunt: "20" }]);
       setNv("");
     };
-    const verwijder = (id: string | number) => {
-      const idStr = id.toString();
-      setLv(lv.map(v => v.id.toString() === idStr ? null : v).filter(Boolean) as Vak[]);
-    };
+    const verwijder = (id: number) => setLv(lv.filter(v => v.id !== id));
 
     const handleOCR = async (e: React.ChangeEvent<HTMLInputElement>) => {
       const fileList = e.target.files;
@@ -1896,7 +1490,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               const pStr = e.punt.replace(",", ".");
               const p = parseFloat(pStr);
               const m = e.maxPunt || (p > 20 ? "100" : "20");
-              return { id: (Date.now() + Math.random()).toString(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
+              return { id: Date.now() + Math.random(), naam: e.naam, isHoofdvak: false, punt: pStr || "", maxPunt: m };
             });
           return [...updated, ...nieuw];
         });

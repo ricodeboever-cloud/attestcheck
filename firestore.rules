@@ -10,6 +10,11 @@ service cloud.firestore {
     function incoming() { return request.resource.data; }
     function existing() { return resource.data; }
     
+    // Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // 👤 USERS
     // ═══════════════════════════════════════════════════════════════════════
@@ -22,37 +27,19 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      // Identity Check: Only owners can access their profile
-      allow get: if isSignedIn() && request.auth.uid == userId;
-      allow list: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming());
       allow delete: if isOwner(userId);
-      
-      // Validation Blueprint: Strict schema for user profiles
-      allow create: if isOwner(userId) && isValidUser(incoming()) && 
-                    incoming().email == request.auth.token.email;
-      
-      allow update: if isOwner(userId) && isValidUser(incoming()) &&
-                    incoming().email == existing().email &&
-                    (!('uid' in incoming()) || !('uid' in existing()) || incoming().uid == existing().uid);
 
       // Subcollection for progression tracking
       match /progression/{date} {
-        // Enforce secure list queries
-        allow list: if isOwner(userId);
-        allow get: if isOwner(userId);
-        
+        allow read: if isOwner(userId);
         allow create: if isOwner(userId) && 
                       incoming().score is number && 
-                      incoming().date == date &&
-                      incoming().userId == request.auth.uid &&
-                      incoming().timestamp == request.time;
-                      
-        allow update: if isOwner(userId) && 
-                      incoming().score is number &&
-                      incoming().date == existing().date &&
-                      incoming().userId == existing().userId &&
-                      incoming().timestamp == request.time;
-        
+                      incoming().date is string &&
+                      incoming().timestamp is timestamp;
+        allow update: if isOwner(userId);
         allow delete: if isOwner(userId);
       }
     }
@@ -69,19 +56,8 @@ service cloud.firestore {
 
     match /feedback/{feedbackId} {
       allow create: if isSignedIn() && isValidFeedback(incoming());
+      // Admins (hypothetical) would need a different rule, for now users just submit.
       allow read, update, delete: if false;
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════
-    // 🧪 MISC
-    // ═══════════════════════════════════════════════════════════════════════
-    match /test/connection {
-      allow get: if true;
-    }
-
-    // Default Deny (Fallback)
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }
