@@ -621,14 +621,14 @@ function AttestatieApp() {
   };
 
   const getApiKey = () => {
-    try {
-      // @ts-ignore
-      const browserProcess = typeof process !== 'undefined' ? process : null;
-      return (browserProcess?.env?.API_KEY || browserProcess?.env?.GEMINI_API_KEY) || 
-             (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
-    } catch (e) {
-      return (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
+    // In AI Studio, the key is usually in process.env.GEMINI_API_KEY
+    if (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) {
+      return process.env.GEMINI_API_KEY;
     }
+    if (typeof process !== 'undefined' && process.env?.API_KEY) {
+      return process.env.API_KEY;
+    }
+    return (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
   };
 
   const checkApiKey = async () => {
@@ -648,12 +648,12 @@ function AttestatieApp() {
   /**
    * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
    */
-  const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
+  const callGeminiWithFallback = async (params: any, retriesPerModel = 2): Promise<any> => {
     const models = [
-      "gemini-3-flash-preview",       // De standaard (snel & gratis)
-      "gemini-flash-latest",          // Stabiele alias (soms ander quotum)
-      "gemini-3.1-flash-lite-preview", // Fallback 1 (extra lichte quota)
-      "gemini-3.1-pro-preview"        // Fallback 2 (krachtigste model)
+      "gemini-3-flash-preview",       // De standaard
+      "gemini-flash-latest",          // Stabiele alias
+      "gemini-3.1-flash-lite",        // Fallback lite
+      "gemini-3.1-pro-preview"        // Fallback pro
     ];
 
     const apiKey = getApiKey();
@@ -758,7 +758,7 @@ function AttestatieApp() {
   };
 
   const vraagFeedback = async () => {
-    if (score === null) return;
+    if (score === null || fbLoad) return;
     setFbLoad(true);
     setFbError("");
     try {
@@ -2045,10 +2045,10 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     const attest = getAttest(score||0);
 
     useEffect(() => {
-      if (!fbData && !fbLoad && score !== null) {
+      if (!fbData && !fbLoad && !fbError && score !== null) {
         vraagFeedback();
       }
-    }, [score, fbData, fbLoad]);
+    }, [score, fbData, fbLoad, fbError]);
 
     useEffect(()=>{
       let raf: number;
@@ -2435,7 +2435,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           )}
 
           <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
-          <Disclaimer />
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
             <button style={S.btnSec} onClick={()=>setScreen("grades")}>
               ⚙️ Punten aanpassen
