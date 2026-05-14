@@ -648,20 +648,20 @@ function AttestatieApp() {
   /**
    * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
    */
-  const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
+  const callGeminiWithFallback = async (params: any, retriesPerModel = 2): Promise<any> => {
     const models = [
-      "gemini-3-flash-preview",       // De standaard (snel & gratis)
-      "gemini-flash-latest",          // Stabiele alias (soms ander quotum)
-      "gemini-3.1-flash-lite-preview", // Fallback 1 (extra lichte quota)
-      "gemini-3.1-pro-preview"        // Fallback 2 (krachtigste model)
+      "gemini-2.0-flash-exp",
+      "gemini-1.5-flash",
+      "gemini-1.5-flash-8b",
+      "gemini-1.5-pro"
     ];
 
     const apiKey = getApiKey();
     if (!apiKey) {
       if (window.aistudio) {
         await window.aistudio.openSelectKey();
-        setHasApiKey(true);
-        // Geen return hier, we proberen het met de nieuwe sleutel (die in process.env komt)
+        const k = getApiKey();
+        if (!k) throw new Error("Geen API-sleutel geconfigureerd.");
       } else {
         throw new Error("Geen API-sleutel geconfigureerd. Voeg VITE_GEMINI_API_KEY toe.");
       }
@@ -674,20 +674,19 @@ function AttestatieApp() {
       while (attempts < retriesPerModel) {
         try {
           console.log(`AI aanroep met model: ${modelName} (Poging ${attempts + 1})`);
-          const response = await ai.models.generateContent({
-            ...params,
+          const model = ai.getGenerativeModel({ 
             model: modelName,
-            config: {
-              ...params.config,
-              safetySettings: [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
-              ]
-            }
+            generationConfig: params.config,
+            safetySettings: [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+            ]
           });
+
+          const result = await model.generateContent(params.contents);
+          const response = await result.response;
           return response;
         } catch (error: any) {
           console.warn(`Fout bij model ${modelName}:`, error);
@@ -695,33 +694,24 @@ function AttestatieApp() {
           const status = error?.status;
           
           const isRateLimit = msg.includes("quota") || msg.includes("429") || status === 429;
-          const isTransient = msg.includes("fetch") || msg.includes("network") || msg.includes("deadline") || msg.includes("500") || msg.includes("503");
-          const isNotFoundError = msg.includes("Requested entity was not found");
+          const isNotFoundError = msg.includes("Requested entity was not found") || msg.includes("model not found");
 
-          if (isNotFoundError && window.aistudio) {
-            console.error("API Key error: Requested entity not found. Re-opening key selector...");
-            setHasApiKey(false);
-            await window.aistudio.openSelectKey();
-            setHasApiKey(true);
-            // Probeer het opnieuw met de nieuwe sleutel
-            attempts++;
-            continue;
+          if (isNotFoundError) {
+            console.warn(`Model ${modelName} niet gevonden. Schakel over naar het volgende model...`);
+            break; // Skip to next model
           }
 
-          if (isRateLimit || isTransient) {
+          if (isRateLimit) {
             if (attempts < retriesPerModel - 1) {
-              const delay = isRateLimit ? 2500 : 1000;
-              console.warn(`Transient/Rate limit op ${modelName}. Retry over ${delay}ms...`);
-              await new Promise(res => setTimeout(res, delay));
+              console.warn(`Rate limit op ${modelName}. Retry over 2s...`);
+              await new Promise(res => setTimeout(res, 2000));
               attempts++;
               continue;
             } else {
-              console.warn(`Model ${modelName} mislukt na ${retriesPerModel} pogingen. Schakel over...`);
               break; 
             }
           }
           
-          // Andere fatale fout?
           throw error;
         }
       }
@@ -821,7 +811,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
       }
 
       const response = await callGeminiWithFallback({
-        contents: { parts: contents },
+        contents: [{ parts: contents }],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -878,8 +868,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
         }
       });
       
-      const text = response.text;
-      if (!text) throw new Error("Geen tekst ontvangen van de coach.");
+      const text = response.text();
       
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
       if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
@@ -1409,8 +1398,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           >
             Mijn Spel & Progressie 🎮
           </button>
-          
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1657,7 +1644,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 <strong>Tip:</strong> Hoofdvakken tellen {CONFIG.hoofdvakMultiplier}× zwaarder mee. Tik op een vak om het aan/uit te zetten.
           </div>
           <button style={S.btn} onClick={verder}>Verder → Attitude & Gedrag 😊</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1743,10 +1729,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           }
         });
 
-        const text = response.text;
-        if (!text) {
-          throw new Error("De AI gaf geen antwoord terug.");
-        }
+        const text = response.text();
 
         const extracted = JSON.parse(cleanJSON(text));
         
@@ -1909,7 +1892,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           ))}
           <div style={{fontSize:11,color:"#8B6242",margin:"8px 0 20px",fontStyle:"italic"}}>⭐ = Hoofdvak (telt {CONFIG.hoofdvakMultiplier}× zwaarder mee)</div>
           <button style={S.btn} onClick={verder}>Verder → Belangrijke vakken ⭐</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -2033,7 +2015,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 Gedrag telt voor <strong>{Math.round(CONFIG.gedragGewicht*100)}%</strong> mee. Je Nederlands kan je score met <strong>3%</strong> verhogen of verlagen.
           </div>
           <button style={S.btn} onClick={verder}>🎯 Bekijk mijn resultaat!</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -2435,7 +2416,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           )}
 
           <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
-          <Disclaimer />
+          
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
             <button style={S.btnSec} onClick={()=>setScreen("grades")}>
               ⚙️ Punten aanpassen
