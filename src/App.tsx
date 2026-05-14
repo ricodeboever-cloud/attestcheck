@@ -289,7 +289,7 @@ function AttestatieApp() {
         focusPoints: finalPoints
       });
       await setDoc(doc(db, "users", updatedUser.uid), userData);
-      setCurrentUser(userData);
+      setCurrentUser({ ...updatedUser, focusPoints: finalPoints });
     } catch (error) {
       console.error("Error generating new focus point:", error);
     }
@@ -345,7 +345,7 @@ function AttestatieApp() {
       });
 
       await setDoc(doc(db, "users", updatedUser.uid), userData);
-      setCurrentUser(userData);
+      setCurrentUser({ ...updatedUser, customBadges: customBadges });
     } catch (error) {
       console.error("Error generating new badge:", error);
     }
@@ -899,15 +899,18 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
         
         // Opslaan in Firestore
         const updatedXP = (currentUser.xp || 0) + 50;
-        const userData = cleanUserForFirestore({
-          ...currentUser,
+        const updatedFields = {
           focusPoints: updatedFocusPoints,
           xp: updatedXP,
           rank: getRankInfo(updatedXP).name
+        };
+        const userData = cleanUserForFirestore({
+          ...currentUser,
+          ...updatedFields
         });
 
         await setDoc(doc(db, "users", currentUser.uid), userData);
-        setCurrentUser(userData);
+        setCurrentUser({ ...currentUser, ...updatedFields });
       }
 
       setFbData(data);
@@ -1612,6 +1615,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             vakken: lv
           });
           await setDoc(doc(db, "users", currentUser.uid), userData);
+          setCurrentUser({ ...currentUser, school, jaar, leeftijd, richting, vakken: lv });
         }
         setVakken(lv); setScreen("behavior");
       } catch (error: any) {
@@ -1823,6 +1827,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             vakken: lv
           });
           await setDoc(doc(db, "users", currentUser.uid), userData);
+          setCurrentUser({ ...currentUser, school, jaar, leeftijd, richting, vakken: lv });
         }
         setVakken(lv); setScreen("important_subjects");
       } catch (error: any) {
@@ -1937,6 +1942,17 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             score: s
           });
           await setDoc(doc(db, "users", currentUser.uid), userData);
+          setCurrentUser({ 
+            ...currentUser, 
+            school, 
+            jaar, 
+            leeftijd, 
+            richting, 
+            vakken, 
+            gedragAntw: la, 
+            nederlandsAntw: ln, 
+            score: s 
+          });
         }
         setGedragAntw(la);
         setNederlandsAntw(ln);
@@ -2398,8 +2414,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             </div>
           )}
 
-          <Disclaimer />
-          
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
             <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
             <button 
