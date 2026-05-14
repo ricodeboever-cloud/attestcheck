@@ -1616,8 +1616,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         setVakken(lv); setScreen("behavior");
       } catch (error: any) {
         console.error("Fout bij opslaan belangrijke vakken:", error);
-        alert("Kon gegevens niet opslaan. Controleer je internetverbinding.");
-        // We still move forward if it's just a save error, but alert the user
+        // We still move forward if it's just a save error
         setVakken(lv); setScreen("behavior");
       }
     };
@@ -1653,7 +1652,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           <div style={{background:"#FEF9C3",border:"1px solid #FDE047",borderRadius:12,padding:"12px 14px",marginBottom:20,fontSize:13,color:"#713F12"}}>
             💡 <strong>Tip:</strong> Hoofdvakken tellen {CONFIG.hoofdvakMultiplier}× zwaarder mee. Tik op een vak om het aan/uit te zetten.
           </div>
-          <button style={S.btn} onClick={verder}>Verder → Punten invoeren 📊</button>
+          <button style={S.btn} onClick={verder}>Verder → Attitude & Gedrag 😊</button>
           <Disclaimer mini />
         </div>
       </div>
@@ -1828,7 +1827,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         setVakken(lv); setScreen("important_subjects");
       } catch (error: any) {
         console.error("Fout bij opslaan punten:", error);
-        alert("Kon je punten niet opslaan op de server, we gaan wel verder.");
         setVakken(lv); setScreen("important_subjects");
       }
     };

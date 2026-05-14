@@ -39,7 +39,7 @@ service cloud.firestore {
 
     // Domain Validators
     function isValidUser(data) {
-      return data.keys().hasAll(['naam', 'email']) && data.keys().size() <= 15 &&
+      return data.keys().hasAll(['naam', 'email']) && data.keys().size() <= 30 &&
              data.naam is string && data.naam.size() > 0 && data.naam.size() < 100 &&
              data.email is string && isValidEmail(data.email) &&
              (!('school' in data) || data.school is string) &&
