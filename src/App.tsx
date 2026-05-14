@@ -16,7 +16,7 @@ import {
   serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import Markdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -621,14 +621,26 @@ function AttestatieApp() {
   };
 
   const getApiKey = () => {
-    // In AI Studio, the key is usually in process.env.GEMINI_API_KEY
-    if (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) {
-      return process.env.GEMINI_API_KEY;
-    }
-    if (typeof process !== 'undefined' && process.env?.API_KEY) {
-      return process.env.API_KEY;
-    }
-    return (import.meta as any).env?.VITE_GEMINI_API_KEY || "";
+    // 1. Check window.aistudio which is injected by the platform
+    // Note: If using AI Studio Free Tier, the key might not be in the environment,
+    // but the platform proxy will handle it. We still need a dummy key for the SDK.
+    
+    // @ts-ignore
+    const env = (import.meta as any).env;
+    const key = env?.VITE_GEMINI_API_KEY || env?.VITE_API_KEY || "";
+    
+    if (key) return key;
+
+    try {
+      // @ts-ignore
+      if (typeof process !== 'undefined' && process.env) {
+        // @ts-ignore
+        const pKey = process.env.GEMINI_API_KEY || process.env.API_KEY;
+        if (pKey) return pKey;
+      }
+    } catch (e) {}
+
+    return "";
   };
 
   const checkApiKey = async () => {
@@ -640,7 +652,6 @@ function AttestatieApp() {
         setHasApiKey(!!getApiKey());
       }
     } catch (e) {
-      console.warn("Error checking API key:", e);
       setHasApiKey(!!getApiKey());
     }
   };
@@ -650,83 +661,85 @@ function AttestatieApp() {
    */
   const callGeminiWithFallback = async (params: any, retriesPerModel = 2): Promise<any> => {
     const models = [
-      "gemini-3-flash-preview",       // De standaard
-      "gemini-flash-latest",          // Stabiele alias
-      "gemini-3.1-flash-lite",        // Fallback lite
-      "gemini-3.1-pro-preview"        // Fallback pro
+      "gemini-2.0-flash",       // Snelste en nieuwste
+      "gemini-1.5-flash",       // Zeer stabiel, hoge quota
+      "gemini-1.5-pro"          // Krachtigste fallback
     ];
 
-    const apiKey = getApiKey();
+    let apiKey = getApiKey();
+    let isPlatformKey = false;
+
     if (!apiKey) {
       if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        setHasApiKey(true);
-        // Geen return hier, we proberen het met de nieuwe sleutel (die in process.env komt)
+        const hasSelected = await window.aistudio.hasSelectedApiKey();
+        if (hasSelected) {
+          // In AI Studio Free Tier, the proxy handles authentication.
+          // We use a placeholder key because the SDK requires a non-empty string.
+          apiKey = "PLATFORM_MANAGED_KEY"; 
+          isPlatformKey = true;
+        } else {
+          await window.aistudio.openSelectKey();
+          apiKey = getApiKey();
+          if (!apiKey) throw new Error("API documentation error: API key missing");
+        }
       } else {
-        throw new Error("Geen API-sleutel geconfigureerd. Voeg VITE_GEMINI_API_KEY toe.");
+        throw new Error("API documentation error: API key missing");
       }
     }
     
-    const ai = new GoogleGenAI({ apiKey: getApiKey() || "" });
+    const genAI = new GoogleGenerativeAI(apiKey);
 
     for (const modelName of models) {
       let attempts = 0;
       while (attempts < retriesPerModel) {
         try {
           console.log(`AI aanroep met model: ${modelName} (Poging ${attempts + 1})`);
-          const response = await ai.models.generateContent({
-            ...params,
+          const model = genAI.getGenerativeModel({ 
             model: modelName,
-            config: {
-              ...params.config,
-              safetySettings: [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
-              ]
-            }
+            safetySettings: [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+            ]
           });
-          return response;
+
+          const result = await model.generateContent(params.prompt || params.contents || params);
+          const response = await result.response;
+          const text = response.text();
+          return text;
         } catch (error: any) {
           console.warn(`Fout bij model ${modelName}:`, error);
           const msg = error?.message || "";
-          const status = error?.status;
           
-          const isRateLimit = msg.includes("quota") || msg.includes("429") || status === 429;
-          const isTransient = msg.includes("fetch") || msg.includes("network") || msg.includes("deadline") || msg.includes("500") || msg.includes("503");
-          const isNotFoundError = msg.includes("Requested entity was not found");
-
-          if (isNotFoundError && window.aistudio) {
-            console.error("API Key error: Requested entity not found. Re-opening key selector...");
-            setHasApiKey(false);
-            await window.aistudio.openSelectKey();
-            setHasApiKey(true);
-            // Probeer het opnieuw met de nieuwe sleutel
-            attempts++;
-            continue;
+          if (msg.includes("API key")) {
+            if (window.aistudio && !isPlatformKey) {
+              await window.aistudio.openSelectKey();
+              apiKey = getApiKey() || "PLATFORM_MANAGED_KEY";
+              attempts++;
+              continue;
+            }
           }
+
+          const isRateLimit = msg.includes("quota") || msg.includes("429");
+          const isTransient = msg.includes("fetch") || msg.includes("network") || msg.includes("deadline") || msg.includes("500") || msg.includes("503");
 
           if (isRateLimit || isTransient) {
             if (attempts < retriesPerModel - 1) {
-              const delay = isRateLimit ? 2500 : 1000;
-              console.warn(`Transient/Rate limit op ${modelName}. Retry over ${delay}ms...`);
+              const delay = isRateLimit ? 2000 : 1000;
               await new Promise(res => setTimeout(res, delay));
               attempts++;
               continue;
             } else {
-              console.warn(`Model ${modelName} mislukt na ${retriesPerModel} pogingen. Schakel over...`);
               break; 
             }
           }
           
-          // Andere fatale fout?
           throw error;
         }
       }
     }
-    throw new Error("Alle beschikbare AI-modellen hebben hun limiet bereikt of geven fouten. Probeer het over een minuutje opnieuw.");
+    throw new Error("Alle AI-modellen zijn momenteel bezet of hebben hun limiet bereikt.");
   };
 
   const [authError, setAuthError] = useState("");
@@ -776,14 +789,6 @@ function AttestatieApp() {
       ).filter(Boolean).join("; ");
 
       const attest = getAttest(score);
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setHasApiKey(false);
-        throw new Error("Gemini API key is niet geconfigureerd.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-
       const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
 Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
 Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
@@ -820,65 +825,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
         });
       }
 
-      const response = await callGeminiWithFallback({
-        contents: { parts: contents },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-              attests: {
-                type: Type.OBJECT,
-                properties: {
-                  A: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  B: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  C: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  }
-                },
-                required: ["A", "B", "C"]
-              },
-              motivation: { type: Type.STRING },
-              focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-          }
-        }
-      });
-      
-      const text = response.text;
+      const text = await callGeminiWithFallback({ prompt: { contents: [{ parts: contents }] } });
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
       
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
@@ -1368,7 +1315,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         >
           Hoe werkt het? ❓
         </button>
-        <Disclaimer />
       </div>
     );
   };
@@ -1409,8 +1355,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           >
             Mijn Spel & Progressie 🎮
           </button>
-          
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1657,7 +1601,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 <strong>Tip:</strong> Hoofdvakken tellen {CONFIG.hoofdvakMultiplier}× zwaarder mee. Tik op een vak om het aan/uit te zetten.
           </div>
           <button style={S.btn} onClick={verder}>Verder → Attitude & Gedrag 😊</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -1723,27 +1666,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en)...`);
         
         // 2. Stuur één enkel verzoek met alle beelden
-        const response = await callGeminiWithFallback({
-          contents: [{ parts: [...imageParts, { text: OCR_PROMPT }] }],
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  naam: { type: Type.STRING },
-                  punt: { type: Type.STRING },
-                  maxPunt: { type: Type.STRING }
-                },
-                required: ["naam", "punt", "maxPunt"]
-              }
-            }
-          }
-        });
+        const text = await callGeminiWithFallback({ prompt: { contents: [{ parts: [...imageParts, { text: OCR_PROMPT }] }] } });
 
-        const text = response.text;
         if (!text) {
           throw new Error("De AI gaf geen antwoord terug.");
         }
@@ -1909,7 +1833,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           ))}
           <div style={{fontSize:11,color:"#8B6242",margin:"8px 0 20px",fontStyle:"italic"}}>⭐ = Hoofdvak (telt {CONFIG.hoofdvakMultiplier}× zwaarder mee)</div>
           <button style={S.btn} onClick={verder}>Verder → Belangrijke vakken ⭐</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
@@ -2033,7 +1956,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             💡 Gedrag telt voor <strong>{Math.round(CONFIG.gedragGewicht*100)}%</strong> mee. Je Nederlands kan je score met <strong>3%</strong> verhogen of verlagen.
           </div>
           <button style={S.btn} onClick={verder}>🎯 Bekijk mijn resultaat!</button>
-          <Disclaimer mini />
         </div>
       </div>
     );
