@@ -28,7 +28,7 @@ app.post("/api/analyze-report", async (req, res) => {
     const { parts } = req.body;
     
     const result = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash",
       contents: [{ role: "user", parts }],
       config: {
         responseMimeType: "application/json",
@@ -39,7 +39,15 @@ app.post("/api/analyze-report", async (req, res) => {
     res.json({ text: result.text });
   } catch (error: any) {
     console.error("OCR Error:", error);
-    res.status(500).json({ error: error.message || "Er is iets misgegaan bij de AI." });
+    let message = "De coach kon je rapport niet scannen.";
+    if (error.status === 429) {
+      message = "De AI is even overbelast. Wacht een minuutje en probeer het opnieuw.";
+    } else if (error.status === 404) {
+      message = "Het AI-model werd niet gevonden. Neem contact op met de beheerder.";
+    } else if (error.message) {
+      message += " Details: " + error.message;
+    }
+    res.status(500).json({ error: message });
   }
 });
 
@@ -61,7 +69,7 @@ app.post("/api/get-feedback", async (req, res) => {
     }
 
     const result = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash",
       contents: [{ role: "user", parts: contents }],
       config: {
         responseMimeType: "application/json",
@@ -122,7 +130,11 @@ app.post("/api/get-feedback", async (req, res) => {
     res.json({ text: result.text });
   } catch (error: any) {
     console.error("AI Feedback Error:", error);
-    res.status(500).json({ error: error.message });
+    let message = "Er ging iets mis bij het genereren van feedback.";
+    if (error.status === 429) {
+      message = "De AI is even overbelast. Wacht een minuutje en probeer het opnieuw.";
+    }
+    res.status(500).json({ error: message });
   }
 });
 
@@ -133,7 +145,7 @@ app.post("/api/chat", async (req, res) => {
   try {
     const { prompt, responseMimeType } = req.body;
     const result = await genAI.models.generateContent({
-      model: "gemini-2.0-flash",
+      model: "gemini-1.5-flash",
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         responseMimeType: responseMimeType || "text/plain",
@@ -142,7 +154,11 @@ app.post("/api/chat", async (req, res) => {
     res.json({ text: result.text });
   } catch (error: any) {
     console.error("Chat Error:", error);
-    res.status(500).json({ error: error.message });
+    let message = "De coach kan even niet antwoorden.";
+    if (error.status === 429) {
+      message = "De AI is even overbelast.";
+    }
+    res.status(500).json({ error: message });
   }
 });
 
