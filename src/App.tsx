@@ -672,10 +672,10 @@ function AttestatieApp() {
    */
   const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
     const models = [
-      "gemini-3-flash-preview",       // De standaard (snel & gratis)
-      "gemini-flash-latest",          // Stabiele alias (soms ander quotum)
-      "gemini-3.1-flash-lite-preview", // Fallback 1 (extra lichte quota)
-      "gemini-3.1-pro-preview"        // Fallback 2 (krachtigste model)
+      "gemini-1.5-flash", 
+      "gemini-2.0-flash", 
+      "gemini-1.5-flash-8b", 
+      "gemini-1.5-pro"
     ];
 
     const apiKey = getApiKey();

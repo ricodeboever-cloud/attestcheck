@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI, Type } from "@google/genai";
+import { createClient, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -17,7 +17,8 @@ const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 if (!apiKey) {
   console.warn("GEMINI_API_KEY is not set. AI features will fail.");
 }
-const genAI = new GoogleGenAI({ 
+
+const client = createClient({ 
   apiKey: apiKey || "MISSING_KEY",
   httpOptions: {
     headers: {
@@ -29,26 +30,26 @@ const genAI = new GoogleGenAI({
 // Helper to call Gemini with a fallback model list and cleaner errors
 async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
   const modelsToTry = [
-    "gemini-3-flash-preview", 
-    "gemini-3.1-flash-lite",
-    "gemini-3.1-pro-preview",
-    "gemini-flash-latest", 
-    "gemini-2.0-flash-exp"
+    "gemini-1.5-flash", 
+    "gemini-2.0-flash", 
+    "gemini-1.5-flash-8b", 
+    "gemini-1.5-pro"
   ];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
     try {
-      console.log(`Trying AI model: ${modelName}...`);
+      console.log(`Trying AI model: ${modelName} with @google/genai Unified SDK...`);
       
-      const response = await genAI.models.generateContent({
+      const response = await client.models.generateContent({
         model: modelName,
         contents: params.contents,
         config: {
           ...params.config,
-          responseSchema: params.schema,
-          temperature: 0.1,
-          safetySettings: [
+          response_schema: params.schema,
+          response_mime_type: params.config?.responseMimeType || params.config?.response_mime_type || "text/plain",
+          temperature: 0.7,
+          safety_settings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
@@ -58,8 +59,8 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
         }
       });
       
-      if (!response.text) {
-        console.warn(`Model ${modelName} returned empty text.`);
+      if (!response || !response.text) {
+        console.warn(`Model ${modelName} returned no response or text.`);
         continue;
       }
       
@@ -69,6 +70,13 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
       lastError = error;
       const status = error.status || (error.message?.includes("429") ? 429 : 500);
       console.warn(`Model ${modelName} failed (Status: ${status}):`, error.message);
+      
+      // Log more details if available
+      if (error.response?.data) {
+        console.warn(`Error details:`, JSON.stringify(error.response.data));
+      } else if (error.details) {
+        console.warn(`Error details:`, JSON.stringify(error.details));
+      }
       
       // If it's a safety error and we already have BLOCK_NONE, trying other models won't help much usually, 
       // but we try anyway unless it's a very specific filter.
@@ -92,6 +100,18 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
 
   throw new Error(friendlyMessage);
 }
+
+app.get("/api/test-ai", async (req, res) => {
+  try {
+    const text = await callGemini({
+      contents: [{ role: "user", parts: [{ text: "Hello, respond with 'AI is working' if you can hear me." }] }],
+      config: { response_mime_type: "text/plain" }
+    });
+    res.json({ status: "success", text });
+  } catch (error: any) {
+    res.status(500).json({ status: "error", message: error.message });
+  }
+});
 
 // API Routes
 app.post("/api/analyze-report", async (req, res) => {
