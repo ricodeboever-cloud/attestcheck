@@ -198,14 +198,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       ).filter(Boolean).join("; ");
 
       const attest = getAttest(score);
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setHasApiKey(false);
-        throw new Error("Gemini API key is niet geconfigureerd.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-
       const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
 Analyseer de resultaten van ${currentUser?.naam || "de student"} (${jaar}).
 Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
@@ -232,76 +224,22 @@ Geef voor ELK van de drie attesten (A, B en C) een analyse:
 Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
 Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 10 woorden per doel) die de student zelf kan afvinken (bijv. 'Elke dag 15 min woordjes Frans leren').`;
 
-      const contents: any[] = [{ text: prompt }];
-      if (reportImage) {
-        contents.push({
-          inlineData: {
-            mimeType: reportMimeType || "image/jpeg",
-            data: reportImage
-          }
-        });
-      }
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: { parts: contents },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-              attests: {
-                type: Type.OBJECT,
-                properties: {
-                  A: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  B: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  C: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  }
-                },
-                required: ["A", "B", "C"]
-              },
-              motivation: { type: Type.STRING },
-              focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-          }
-        }
+      const res = await fetch("/api/get-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          image: reportImage,
+          mimeType: reportMimeType
+        })
       });
 
-      const text = response.text;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Fout bij de AI coach");
+      }
+
+      const { text } = await res.json();
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
 
       const data = JSON.parse(text) as FeedbackData;
@@ -332,8 +270,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       console.error("AI Feedback Error:", error);
       let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
       if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
-        msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
-        setHasApiKey(false);
+        msg = "De coach heeft geen toegang tot de AI. Controleer of de GEMINI_API_KEY correct is ingesteld in de instellingen.";
       } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
         msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
       }

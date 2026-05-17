@@ -45,10 +45,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     setFbError("");
     
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) throw new Error("Geen API key gevonden. Configureer deze in de instellingen.");
-      
-      const ai = new GoogleGenAI({ apiKey });
       const parts: any[] = [{ text: OCR_PROMPT }];
       
       let firstImageBase64 = "";
@@ -72,16 +68,18 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         }
       }
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: { parts },
-        config: { 
-          responseMimeType: "application/json",
-          temperature: 0.1 // Lower temperature for more consistent OCR
-        }
+      const res = await fetch("/api/analyze-report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parts, prompt: OCR_PROMPT })
       });
 
-      const text = response.text;
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Fout bij het scannen van het rapport");
+      }
+
+      const { text } = await res.json();
       if (!text) throw new Error("De AI gaf geen antwoord terug. Probeer het opnieuw.");
       
       const data = JSON.parse(text);

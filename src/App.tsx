@@ -260,21 +260,22 @@ function AttestatieApp() {
   // ── 9. PROGRESSIE LOGICA ──────────────────────────────
   const generateNewFocusPoint = async (updatedUser: any) => {
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) return;
-      const ai = new GoogleGenAI({ apiKey });
       const prompt = `Je bent een schoolcoach. De student heeft net een focusdoel voltooid.
       Genereer ÉÉN nieuw, concreet en haalbaar focusdoel (max 10 woorden) voor deze student.
       Huidige vakken: ${updatedUser.vakken?.map((v: any) => v.naam).join(", ")}
       Huidige score: ${updatedUser.score}%
       Geef alleen de tekst van het doel terug, niks anders.`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
       });
 
-      const newText = response.text?.trim() || "Blijf gefocust op je doelen!";
+      if (!res.ok) throw new Error("Fout bij AI chat");
+      const { text } = await res.json();
+
+      const newText = text?.trim() || "Blijf gefocust op je doelen!";
       const newPoint = {
         id: Date.now().toString(),
         text: newText,
@@ -297,10 +298,6 @@ function AttestatieApp() {
 
   const generateNewBadge = async (updatedUser: any, earnedBadgeId: string) => {
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) return;
-      const ai = new GoogleGenAI({ apiKey });
-      
       const earnedBadge = CONFIG.BADGES.find(b => b.id === earnedBadgeId) || 
                          (updatedUser.customBadges || []).find((b: any) => b.id === earnedBadgeId);
       
@@ -313,13 +310,16 @@ function AttestatieApp() {
       Geef dit terug in JSON formaat met velden: name, description, requirementText.
       De requirementText moet een simpele voorwaarde zijn (bijv. "Voltooi nog 10 focus punten").`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, responseMimeType: "application/json" })
       });
 
-      const data = JSON.parse(response.text || "{}");
+      if (!res.ok) throw new Error("Fout bij AI chat");
+      const { text } = await res.json();
+
+      const data = JSON.parse(text || "{}");
       if (!data.name) return;
 
       const numCompleted = updatedUser.focusPoints?.filter((p: any) => p.completed).length || 0;
@@ -776,14 +776,6 @@ function AttestatieApp() {
       ).filter(Boolean).join("; ");
 
       const attest = getAttest(score);
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        setHasApiKey(false);
-        throw new Error("Gemini API key is niet geconfigureerd.");
-      }
-
-      const ai = new GoogleGenAI({ apiKey });
-
       const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
 Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
 Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
@@ -810,75 +802,22 @@ Geef voor ELK van de drie attesten (A, B en C) een analyse:
 Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
 Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse doelen (max 10 woorden per doel) die de student zelf kan afvinken. Zorg dat deze doelen AFWIJKEN van vorige doelen als je die ziet in de context (bijv. 'Elke dag 15 min woordjes Frans leren', 'Vraag extra uitleg voor Wiskunde', etc.).`;
 
-      const contents: any[] = [{ text: prompt }];
-      if (reportImage) {
-        contents.push({
-          inlineData: {
-            mimeType: "image/jpeg",
-            data: reportImage
-          }
-        });
+      const res = await fetch("/api/get-feedback", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          image: reportImage,
+          mimeType: "image/jpeg"
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Fout bij de AI coach");
       }
 
-      const response = await callGeminiWithFallback({
-        contents: { parts: contents },
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-              attests: {
-                type: Type.OBJECT,
-                properties: {
-                  A: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  B: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  },
-                  C: {
-                    type: Type.OBJECT,
-                    properties: {
-                      status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                      title: { type: Type.STRING },
-                      description: { type: Type.STRING },
-                      actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                      consequences: { type: Type.STRING },
-                      emoji: { type: Type.STRING }
-                    },
-                    required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                  }
-                },
-                required: ["A", "B", "C"]
-              },
-              motivation: { type: Type.STRING },
-              focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
-            },
-            required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-          }
-        }
-      });
-      
-      const text = response.text;
+      const { text } = await res.json();
       if (!text) throw new Error("Geen tekst ontvangen van de coach.");
       
       const data = JSON.parse(cleanJSON(text)) as FeedbackData;
@@ -919,8 +858,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
       console.error("AI Feedback Error:", error);
       let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
       if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
-        msg = "De coach heeft geen toegang tot de AI. Klik op de knop hieronder om dit op te lossen.";
-        setHasApiKey(false); // Forceer de knop om te verschijnen
+        msg = "De coach heeft geen toegang tot de AI. Controleer de instellingen.";
       } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
         msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
       }
@@ -1700,13 +1638,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       setOcrLoading(true); setOcrMsg(""); setOcrFout("");
       
       try {
-        // PRE-CHECK API KEY om glitch te voorkomen (vooral in AI Studio)
-        const apiKey = getApiKey();
-        if (!apiKey && window.aistudio) {
-          console.log("Geen API key gevonden, open selectie...");
-          await window.aistudio.openSelectKey();
-        }
-
         // 1. Lees alle bestanden naar base64
         const imageParts = await Promise.all(files.map(async (file) => {
           return new Promise<any>((resolve, reject) => {
@@ -1722,28 +1653,18 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
         console.log(`OCR: Bezig met analyseren van ${files.length} bestand(en)...`);
         
-        // 2. Stuur één enkel verzoek met alle beelden
-        const response = await callGeminiWithFallback({
-          contents: [{ parts: [...imageParts, { text: OCR_PROMPT }] }],
-          config: {
-            responseMimeType: "application/json",
-            temperature: 0.1,
-            responseSchema: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  naam: { type: Type.STRING },
-                  punt: { type: Type.STRING },
-                  maxPunt: { type: Type.STRING }
-                },
-                required: ["naam", "punt", "maxPunt"]
-              }
-            }
-          }
+        const res = await fetch("/api/analyze-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ parts: [...imageParts, { text: OCR_PROMPT }], prompt: OCR_PROMPT })
         });
 
-        const text = response.text;
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || "Fout bij de AI scan");
+        }
+
+        const { text } = await res.json();
         if (!text) {
           throw new Error("De AI gaf geen antwoord terug.");
         }
@@ -1792,23 +1713,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
         setOcrMsg(`✅ ${merged.length} vakken hersteld uit ${files.length} foto's!`);
         
-        // Parent state pas aan het eind updaten om UI-stability te bewaren
         if (imageParts.length > 0) {
           setReportImage(imageParts[imageParts.length - 1].inlineData.data);
         }
       } catch (error: any) {
         console.error("AI OCR Error (Grades):", error);
-        let msg = "Kon de rapporten niet volledig lezen. Probeer duidelijkere foto's.";
-        if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("401")) {
-          msg = "Fout met de AI-sleutel. Controleer je 'Secrets' in AI Studio (VITE_GEMINI_API_KEY).";
-        } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
-          msg = "De AI is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
-        } else if (error?.message?.includes("Safety")) {
-          msg = "De AI weigerde dit bestand te lezen vanwege veiligheidsinstellingen.";
-        } else if (error instanceof SyntaxError) {
-          msg = "De AI gaf een ongeldig antwoord terug. Probeer het nog eens.";
-        }
-        setOcrFout(msg);
+        setOcrFout("De coach kon je rapport niet scannen: " + (error.message || "Probeer het later opnieuw."));
       } finally {
         setOcrLoading(false);
         e.target.value = "";

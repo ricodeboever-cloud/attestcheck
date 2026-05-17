@@ -3,5 +3,8 @@
   "description": "Ontdek welk attest je op dit moment zou krijgen op basis van je punten en gedrag.",
   "requestFramePermissions": [
     "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ]
 }
