@@ -19,52 +19,50 @@ if (!apiKey) {
 }
 const genAI = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
 
-// Helper to call Gemini with a stable method and cleaner errors
+// Helper to call Gemini with a fallback model list and cleaner errors
 async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
-  const modelName = "gemini-1.5-flash";
-  let retries = 2;
-  
-  while (retries >= 0) {
+  const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
+  let lastError: any = null;
+
+  for (const modelName of modelsToTry) {
     try {
-      const model = genAI.getGenerativeModel({ 
+      console.log(`Trying AI model: ${modelName}...`);
+      
+      const result = await genAI.models.generateContent({
         model: modelName,
-        generationConfig: {
+        contents: params.contents,
+        config: {
           ...params.config,
           responseSchema: params.schema,
           temperature: 0.1,
         }
       });
-
-      const result = await model.generateContent({
-        contents: params.contents,
-      });
       
-      const text = result.response.text();
-      if (!text) throw new Error("De AI gaf geen antwoord terug.");
-      return text;
+      if (!result.text) continue; 
+      
+      console.log(`Success with ${modelName}`);
+      return result.text;
     } catch (error: any) {
-      console.error(`Gemini Error (${modelName}, retries left: ${retries}):`, error.status || error.message);
+      lastError = error;
+      console.warn(`Model ${modelName} failed:`, error.status || error.message);
       
-      if (retries > 0 && (error.status === 429 || error.status >= 500)) {
-        retries--;
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
-        continue;
-      }
-
-      let friendlyMessage = "De AI coach heeft op dit moment een klein probleem.";
+      // If it's a safety error, don't retry other models
+      if (error.message?.includes("Safety")) break;
       
-      if (error.status === 429 || error.message?.includes("429") || error.message?.includes("quota")) {
-        friendlyMessage = "De AI coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het dan nog eens.";
-      } else if (error.status === 401 || error.status === 403 || error.message?.includes("API key")) {
-        friendlyMessage = "Er is een probleem met de API-sleutel. Controleer de instellingen.";
-      } else if (error.message?.includes("Safety")) {
-        friendlyMessage = "De AI coach kon dit niet lezen vanwege veiligheidsfilters. Probeer een andere foto.";
-      }
-
-      throw new Error(friendlyMessage);
+      // Try next model...
+      continue;
     }
   }
-  throw new Error("De AI coach is momenteel niet bereikbaar.");
+
+  // All models failed
+  let friendlyMessage = "De AI coach heeft op dit moment een klein probleem.";
+  if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
+    friendlyMessage = "De AI coach is even overbelast. Wacht een minuutje en probeer het dan nog eens.";
+  } else if (lastError?.status === 401 || lastError?.status === 403 || lastError?.message?.includes("API key")) {
+    friendlyMessage = "Er is een probleem met de API-sleutel. Controleer de instellingen.";
+  }
+
+  throw new Error(friendlyMessage);
 }
 
 // API Routes
