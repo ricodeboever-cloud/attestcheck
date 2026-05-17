@@ -89,13 +89,13 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
   }
 
   // All models failed
-  let friendlyMessage = "De AI coach heeft een technisch probleem.";
+  let friendlyMessage = "De AI kon het rapport niet analyseren.";
   if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
-    friendlyMessage = "De AI coach is tijdelijk overbelast (limiet bereikt). Wacht een minuutje en probeer het dan nog eens.";
+    friendlyMessage = "De AI service is tijdelijk overbelast. Wacht een minuutje en probeer het dan nog eens.";
   } else if (lastError?.status === 401 || lastError?.status === 403 || lastError?.message?.includes("API key")) {
-    friendlyMessage = "Er is een probleem met de API-sleutel in de instellingen.";
+    friendlyMessage = "Er is een probleem met de AI configuratie.";
   } else if (lastError?.message) {
-    friendlyMessage = `De AI coach kon niet antwoorden: ${lastError.message}`;
+    friendlyMessage = `De AI kon niet antwoorden: ${lastError.message}`;
   }
 
   throw new Error(friendlyMessage);
@@ -142,107 +142,6 @@ app.post("/api/analyze-report", async (req, res) => {
     res.json({ text });
   } catch (error: any) {
     console.error("OCR Error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post("/api/get-feedback", async (req, res) => {
-  if (!apiKey) {
-    return res.status(401).json({ error: "De AI coach is nog niet geconfigureerd. Voeg een GEMINI_API_KEY toe aan de Secrets." });
-  }
-  try {
-    const { prompt, image, mimeType } = req.body;
-    
-    const contents: any[] = [{ role: "user", parts: [{ text: prompt }] }];
-    if (image) {
-      (contents[0].parts as any[]).push({
-        inlineData: {
-          mimeType: mimeType || "image/jpeg",
-          data: image
-        }
-      });
-    }
-
-    const text = await callGemini({
-      contents,
-      config: {
-        responseMimeType: "application/json",
-      },
-      schema: {
-        type: Type.OBJECT,
-        properties: {
-          predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-          attests: {
-            type: Type.OBJECT,
-            properties: {
-              A: {
-                type: Type.OBJECT,
-                properties: {
-                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  consequences: { type: Type.STRING },
-                  emoji: { type: Type.STRING }
-                },
-                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-              },
-              B: {
-                type: Type.OBJECT,
-                properties: {
-                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  consequences: { type: Type.STRING },
-                  emoji: { type: Type.STRING }
-                },
-                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-              },
-              C: {
-                type: Type.OBJECT,
-                properties: {
-                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                  title: { type: Type.STRING },
-                  description: { type: Type.STRING },
-                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  consequences: { type: Type.STRING },
-                  emoji: { type: Type.STRING }
-                },
-                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-              }
-            },
-            required: ["A", "B", "C"]
-          },
-          motivation: { type: Type.STRING },
-          focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-      }
-    });
-
-    res.json({ text });
-  } catch (error: any) {
-    console.error("AI Feedback Error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-app.post("/api/chat", async (req, res) => {
-  if (!apiKey) {
-    return res.status(401).json({ error: "De AI coach is nog niet geconfigureerd. Voeg een GEMINI_API_KEY toe aan de Secrets." });
-  }
-  try {
-    const { prompt, responseMimeType } = req.body;
-    const text = await callGemini({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      config: {
-        responseMimeType: responseMimeType || "text/plain",
-      }
-    });
-    res.json({ text });
-  } catch (error: any) {
-    console.error("Chat Error:", error);
     res.status(500).json({ error: error.message });
   }
 });

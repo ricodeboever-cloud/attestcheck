@@ -192,12 +192,6 @@ const CONFIG = {
     { id: "spreken",   vraag: "Kan ik vlot Nederlandse zinnen spreken?",   emoji: "🗣️" },
   ],
   BADGES: [
-    { id: "first_step", name: "Eerste Stap 👣", description: "Voltooi je eerste focus punt.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 1 },
-    { id: "focus_fan", name: "Focus Fanaat 🎯", description: "Voltooi 5 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 5 },
-    { id: "consistency", name: "Consistentie Koning 👑", description: "Voltooi 10 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 10 },
-    { id: "focus_master", name: "Focus Meester 🏆", description: "Voltooi 25 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 25 },
-    { id: "focus_legend", name: "Focus Legende 🌌", description: "Voltooi 50 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 50 },
-    { id: "focus_god", name: "Focus God-mode ⚡", description: "Voltooi 100 focus punten.", requirement: (user: any) => (user.focusPoints?.filter((p: any) => p.completed).length || 0) >= 100 },
     { id: "veteran", name: "Rapport Radar Veteraan 🎖️", description: "Sla 3 verschillende scores op.", requirement: (user: any, progression: any[]) => progression.length >= 3 },
     { id: "rising_star", name: "Stijgende Lijn 📈", description: "Heb een stijgende trend in je progressie.", requirement: (user: any, progression: any[]) => {
       if (progression.length < 2) return false;
@@ -249,14 +243,6 @@ function AttestatieApp() {
     setNederlandsAntw,
     score,
     setScore,
-    selectedAttest,
-    setSelectedAttest,
-    fbData,
-    setFbData,
-    fbLoad,
-    setFbLoad,
-    fbError,
-    setFbError,
     reportImage,
     setReportImage,
     hasApiKey,
@@ -277,143 +263,6 @@ function AttestatieApp() {
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const [progressionLoading, setProgressionLoading] = useState(false);
-  const [newBadge,       setNewBadge]      = useState<any>(null);
-
-  // ── 9. PROGRESSIE LOGICA ──────────────────────────────
-  const generateNewFocusPoint = async (updatedUser: any) => {
-    try {
-      const prompt = `Je bent een schoolcoach. De student heeft net een focusdoel voltooid.
-      Genereer ÉÉN nieuw, concreet en haalbaar focusdoel (max 10 woorden) voor deze student.
-      Huidige vakken: ${updatedUser.vakken?.map((v: any) => v.naam).join(", ")}
-      Huidige score: ${updatedUser.score}%
-      Geef alleen de tekst van het doel terug, niks anders.`;
-
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt })
-      });
-
-      if (!res.ok) throw new Error("Fout bij AI chat");
-      const { text } = await res.json();
-
-      const newText = text?.trim() || "Blijf gefocust op je doelen!";
-      const newPoint = {
-        id: Date.now().toString(),
-        text: newText,
-        completed: false,
-        xpValue: 50,
-        createdAt: new Date().toISOString()
-      };
-
-      const finalPoints = [...(updatedUser.focusPoints || []), newPoint];
-      const userData = cleanUserForFirestore({
-        ...updatedUser,
-        focusPoints: finalPoints
-      });
-      await setDoc(doc(db, "users", updatedUser.uid), userData);
-      setCurrentUser({ ...updatedUser, focusPoints: finalPoints });
-    } catch (error) {
-      console.error("Error generating new focus point:", error);
-    }
-  };
-
-  const generateNewBadge = async (updatedUser: any, earnedBadgeId: string) => {
-    try {
-      const earnedBadge = CONFIG.BADGES.find(b => b.id === earnedBadgeId) || 
-                         (updatedUser.customBadges || []).find((b: any) => b.id === earnedBadgeId);
-      
-      if (!earnedBadge) return;
-
-      const prompt = `Je bent een gamification expert. De student heeft de badge "${earnedBadge.name}" behaald (${earnedBadge.description}).
-      Bedenk ÉÉN nieuwe, uitdagendere en ORIGINELE badge (naam + beschrijving + vereiste in tekst) die hierop volgt.
-      BELANGRIJK: Focus op prestaties en inzet, NIET op het bereiken van een bepaalde rang of XP (dat is saai).
-      Bedenk iets creatiefs zoals "Taalkoning", "Wiskunde Tijger", "Doorzetter van de Week", etc.
-      Geef dit terug in JSON formaat met velden: name, description, requirementText.
-      De requirementText moet een simpele voorwaarde zijn (bijv. "Voltooi nog 10 focus punten").`;
-
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, responseMimeType: "application/json" })
-      });
-
-      if (!res.ok) throw new Error("Fout bij AI chat");
-      const { text } = await res.json();
-
-      const data = JSON.parse(text || "{}");
-      if (!data.name) return;
-
-      const numCompleted = updatedUser.focusPoints?.filter((p: any) => p.completed).length || 0;
-      const newBadge = {
-        id: `custom_${Date.now()}`,
-        name: data.name,
-        description: data.description,
-        requirementText: data.requirementText,
-        requirementType: "focus_points",
-        requirementValue: numCompleted + 5
-      };
-
-      const customBadges = [...(updatedUser.customBadges || []), newBadge];
-      
-      const cleanCustomBadges = customBadges.map(b => {
-        const { requirement, ...rest } = b;
-        return rest;
-      });
-
-      const userData = cleanUserForFirestore({
-        ...updatedUser,
-        customBadges: cleanCustomBadges
-      });
-
-      await setDoc(doc(db, "users", updatedUser.uid), userData);
-      setCurrentUser({ ...updatedUser, customBadges: customBadges });
-    } catch (error) {
-      console.error("Error generating new badge:", error);
-    }
-  };
-
-  const checkBadges = async (updatedUser: any, currentProgression: any[]) => {
-    const earnedBadges = updatedUser.badges || [];
-    const newlyEarned = [];
-    const allAvailableBadges = [...CONFIG.BADGES, ...(updatedUser.customBadges || [])];
-
-    for (const badge of allAvailableBadges) {
-      if (!earnedBadges.includes(badge.id)) {
-        if (typeof badge.requirement === 'function') {
-          if (badge.requirement(updatedUser, currentProgression)) {
-            newlyEarned.push(badge.id);
-          }
-        } else if (badge.requirementType === 'focus_points') {
-          const completedCount = updatedUser.focusPoints?.filter((p: any) => p.completed).length || 0;
-          if (completedCount >= (badge.requirementValue || 0)) {
-            newlyEarned.push(badge.id);
-          }
-        }
-      }
-    }
-
-    if (newlyEarned.length > 0) {
-      const allEarned = [...earnedBadges, ...newlyEarned];
-      try {
-        const userToUpdate = cleanUserForFirestore({ ...updatedUser, badges: allEarned });
-        await setDoc(doc(db, "users", updatedUser.uid), userToUpdate);
-        setCurrentUser(userToUpdate);
-        
-        // Show notification for the first new badge
-        const badgeInfo = allAvailableBadges.find(b => b.id === newlyEarned[0]);
-        setNewBadge(badgeInfo);
-        setTimeout(() => setNewBadge(null), 5000);
-
-        // Generate a new badge challenge for each earned badge
-        for (const bId of newlyEarned) {
-          generateNewBadge(userToUpdate, bId);
-        }
-      } catch (error) {
-        console.error("Error saving badges:", error);
-      }
-    }
-  };
 
   const fetchProgression = async () => {
     if (!currentUser) return;
@@ -450,7 +299,6 @@ function AttestatieApp() {
       const snap = await getDocs(q);
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setProgression(data);
-      checkBadges(currentUser, data);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/progression/${today}`);
     }
@@ -583,26 +431,6 @@ function AttestatieApp() {
     completed: boolean;
     xpValue: number;
     createdAt: string;
-  }
-
-  interface AttestInfo {
-    status: "behaald" | "mogelijk" | "gevaar";
-    title: string;
-    description: string;
-    actionPlan: string[];
-    consequences: string;
-    emoji: string;
-  }
-
-  interface FeedbackData {
-    predictedAttest: "A" | "B" | "C";
-    attests: {
-      A: AttestInfo;
-      B: AttestInfo;
-      C: AttestInfo;
-    };
-    motivation: string;
-    focusPoints: string[];
   }
 
   const cleanJSON = (text: string) => {
@@ -769,124 +597,10 @@ function AttestatieApp() {
         await window.aistudio.openSelectKey();
         console.log("Sleutel selectie venster geopend.");
         setHasApiKey(true);
-        setFbError(""); // Wis foutmelding zodat gebruiker opnieuw kan proberen
       } catch (err) {
         console.error("Fout bij openen sleutel-venster:", err);
-        setFbError("Kon het venster niet openen. Probeer de pagina te verversen.");
       }
-    } else {
-      setFbError("Geen AI-sleutel gevonden. Neem contact op met de beheerder.");
     }
-  };
-
-  const vraagFeedback = async () => {
-    if (score === null) return;
-    setFbLoad(true);
-    setFbError("");
-    try {
-      const ingevuld = vakken.filter(v=>v.punt!==""&&!isNaN(parseFloat(v.punt)));
-      const vakInfo = ingevuld.map(v=>{
-        const p=Math.round((parseFloat(v.punt)/parseFloat(v.maxPunt))*100);
-        return `${v.naam}${v.isHoofdvak?" (HOOFDVAK ⭐)":""}: ${v.punt}/${v.maxPunt} (${p}%)`;
-      }).join(", ");
-      const gedragInfo = CONFIG.gedragsVragen.map(v=>
-        gedragAntw[v.id]?`${v.vraag}: ${gedragAntw[v.id]}/5`:""
-      ).filter(Boolean).join("; ");
-
-      const nedInfo = CONFIG.nederlandsVragen.map(v=>
-        nederlandsAntw[v.id]?`${v.vraag}: ${nederlandsAntw[v.id]}`:""
-      ).filter(Boolean).join("; ");
-
-      const attest = getAttest(score);
-      const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
-Analyseer de resultaten van ${currentUser?.naam||"de student"} (${jaar}).
-Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
-
-Context:
-- Punten tellen voor 88%, gedrag voor 12%.
-- Hoofdvakken (⭐) tellen 3x zwaarder.
-- Nederlands niveau (impact +/- 3%): ${nedInfo}
-- Vakken: ${vakInfo}
-- Gedrag: ${gedragInfo}
-
-Terminologie-hulp:
-- Attest A: Geslaagd. Attest B: Geslaagd, maar met uitsluiting van bepaalde richtingen. Attest C: Niet geslaagd.
-
-Geef uitvoerige maar hapklare feedback in JSON formaat.
-Bepaal welk attest (A, B of C) de student momenteel zou krijgen.
-Geef voor ELK van de drie attesten (A, B en C) een analyse:
-1. status: 'behaald' (huidig), 'mogelijk' (verbetering), 'gevaar' (verslechtering).
-2. title: Pakkende titel.
-3. description: Wat betekent dit specifiek voor deze student?
-4. actionPlan: 3-4 concrete stappen om dit te bereiken/behouden.
-5. consequences: Gevolgen van dit attest.
-6. emoji: Passende emoji.
-Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
-Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse doelen (max 10 woorden per doel) die de student zelf kan afvinken. Zorg dat deze doelen AFWIJKEN van vorige doelen als je die ziet in de context (bijv. 'Elke dag 15 min woordjes Frans leren', 'Vraag extra uitleg voor Wiskunde', etc.).`;
-
-      const res = await fetch("/api/get-feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          image: reportImage,
-          mimeType: "image/jpeg"
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Fout bij de AI coach");
-      }
-
-      const { text } = await res.json();
-      if (!text) throw new Error("Geen tekst ontvangen van de coach.");
-      
-      const data = JSON.parse(cleanJSON(text)) as FeedbackData;
-      if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
-      
-      // Focus points omzetten naar objecten voor de checklist en toevoegen aan bestaande (niet-voltooide) lijst
-      if (data.focusPoints && currentUser) {
-        const newFocusPoints: FocusPoint[] = data.focusPoints.map((text, i) => ({
-          id: `fp_${Date.now()}_${i}`,
-          text,
-          completed: false,
-          xpValue: 20 + Math.floor(Math.random() * 11), // Variabele XP tussen 20 en 30
-          createdAt: new Date().toISOString()
-        }));
-        
-        // Behoud oude focuspunten die nog niet voltooid zijn, maar voeg de nieuwe toe bovenaan
-        const updatedFocusPoints = [...newFocusPoints, ...(currentUser.focusPoints || []).filter((p: any) => !p.completed)];
-        
-        // Opslaan in Firestore
-        const updatedXP = (currentUser.xp || 0) + 50;
-        const updatedFields = {
-          focusPoints: updatedFocusPoints,
-          xp: updatedXP,
-          rank: getRankInfo(updatedXP).name
-        };
-        const userData = cleanUserForFirestore({
-          ...currentUser,
-          ...updatedFields
-        });
-
-        await setDoc(doc(db, "users", currentUser.uid), userData);
-        setCurrentUser({ ...currentUser, ...updatedFields });
-      }
-
-      setFbData(data);
-      setSelectedAttest(data.predictedAttest);
-    } catch (error: any) {
-      console.error("AI Feedback Error:", error);
-      let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
-      if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
-        msg = "De coach heeft geen toegang tot de AI. Controleer de instellingen.";
-      } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
-        msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
-      }
-      setFbError(msg);
-    }
-    setFbLoad(false);
   };
 
   // ── Font laden + Firebase auth listener ────────────────────
@@ -1861,14 +1575,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         setNederlandsAntw(ln);
         setScore(s);
         setScreen("results");
-        if (typeof vraagFeedback === "function") vraagFeedback();
       } catch (error: any) {
         console.error("Fout bij opslaan gedrag data:", error);
         setGedragAntw(la);
         setNederlandsAntw(ln);
         setScore(s);
         setScreen("results");
-        if (typeof vraagFeedback === "function") vraagFeedback();
       }
     };
     return (
@@ -1946,12 +1658,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const ResultsScreen = () => {
     const [anim, setAnim] = useState(0);
     const attest = getAttest(score||0);
-
-    useEffect(() => {
-      if (!fbData && !fbLoad && score !== null) {
-        vraagFeedback();
-      }
-    }, [score, fbData, fbLoad]);
 
     useEffect(()=>{
       let raf: number;
@@ -2168,154 +1874,11 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           <Speedo val={anim}/>
           <CharacterAnimation val={anim}/>
 
-          {!fbData && (
-            <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
-              borderRadius:16,padding:"16px 20px",marginBottom:16}}>
-              <div style={{fontSize:22,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
-              <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
-            </div>
-          )}
-          
-          {fbLoad && !fbData && (
-            <div style={{textAlign:"center", padding:20, background:ORBG, borderRadius:16, marginBottom:20}}>
-              <div style={{fontSize:30, marginBottom:10, animation:"spin 2s linear infinite"}}>⏳</div>
-              <p style={{fontWeight:800, color:OR, margin:0}}>De coach analyseert jouw rapport...</p>
-            </div>
-          )}
-
-          {fbError && (
-            <div style={{marginBottom:20, textAlign:"center"}}>
-              <div style={{...S.err, marginBottom:8}}>{fbError}</div>
-              <div style={{display:"flex", gap:8, justifyContent:"center"}}>
-                {!hasApiKey && (
-                  <button 
-                    style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
-                    onClick={handleSelectKey}
-                  >
-                    🔑 Sleutel Instellen
-                  </button>
-                )}
-                <button 
-                  style={{...S.btnSec, padding:"8px 16px", fontSize:13, flex:1, cursor:"pointer"}} 
-                  onClick={vraagFeedback}
-                >
-                  🔄 Opnieuw Proberen
-                </button>
-              </div>
-            </div>
-          )}
-
-          {fbData && (
-            <div style={{display:"flex",flexDirection:"column",gap:20,marginBottom:24,textAlign:"left"}}>
-              {/* Samenvatting Quote */}
-              <div style={{textAlign:"center", padding:"16px 20px", background:`${OR}0D`, borderRadius:16, border:`1px dashed ${OR}44`}}>
-                <div style={{fontSize:10, fontWeight:900, color:OR, textTransform:"uppercase", letterSpacing:1, marginBottom:6}}>De Coach in 1 zin:</div>
-                <p style={{fontSize:18, fontWeight:900, color:OR, fontStyle:"italic", margin:0, lineHeight:1.3}}>"{fbData.motivation}"</p>
-              </div>
-
-              {/* Attest Knoppen */}
-              <div style={{display:"flex", gap:8, background:ORBG, padding:6, borderRadius:16, marginBottom: 12}}>
-                {(["A", "B", "C"] as const).map((at) => {
-                  const isActive = selectedAttest === at;
-                  const isPredicted = fbData.predictedAttest === at;
-                  const info = fbData.attests[at];
-                  
-                  return (
-                    <motion.button
-                      key={at}
-                      whileHover={{ y: -2, scale: 1.02 }}
-                      whileTap={{ scale: 0.98 }}
-                      onClick={() => setSelectedAttest(at)}
-                      style={{
-                        flex: 1,
-                        padding: "16px 8px", // Iets ruimer
-                        borderRadius: 12,
-                        border: isActive ? `2px solid ${OR}` : "2px solid transparent",
-                        cursor: "pointer",
-                        background: isActive ? OR : "white",
-                        color: isActive ? "white" : "#8B6242",
-                        boxShadow: isActive ? `0 4px 12px ${OR}44` : "0 2px 4px rgba(0,0,0,0.05)",
-                        transition: "background-color 0.2s, color 0.2s, box-shadow 0.2s",
-                        position: "relative",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: 4,
-                        overflow: "visible"
-                      }}
-                    >
-                      <span style={{fontSize:22, fontWeight:900}}>{at}</span>
-                      <span style={{fontSize:10, fontWeight:800, textTransform:"uppercase", opacity:0.8}}>Attest</span>
-                      {isPredicted && (
-                        <div style={{
-                          position:"absolute", top:-10, left: "50%", transform: "translateX(-50%)", background:"#22C55E", color:"white",
-                          fontSize:9, padding:"2px 8px", borderRadius:20, fontWeight:900, border:"2px solid white",
-                          boxShadow: "0 2px 8px rgba(34, 197, 94, 0.4)", whiteSpace: "nowrap"
-                        }}>HUIDIG</div>
-                      )}
-                      
-                      {!isActive && (
-                        <div style={{
-                          position: "absolute", bottom: -15, width: "100%", textAlign: "center",
-                          fontSize: 9, fontWeight: 700, color: OR, opacity: 0.6
-                        }}>
-                          Klik voor info 👆
-                        </div>
-                      )}
-                    </motion.button>
-                  );
-                })}
-              </div>
-
-              {/* Attest Content */}
-              {selectedAttest && (
-                <div style={{
-                  background: "white", border: `2px solid ${selectedAttest === fbData.predictedAttest ? "#22C55E" : ORPL}`,
-                  borderRadius: 20, padding: 20, animation: "bounce .3s ease"
-                }}>
-                  <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:16}}>
-                    <div style={{fontSize:32}}>{fbData.attests[selectedAttest].emoji}</div>
-                    <div>
-                      <h3 style={{fontWeight:900, color:"#2D1B00", fontSize:18, margin:0}}>
-                        {fbData.attests[selectedAttest].title}
-                      </h3>
-                      <div style={{
-                        fontSize:10, fontWeight:800, color: selectedAttest === fbData.predictedAttest ? "#22C55E" : OR,
-                        textTransform:"uppercase", letterSpacing:0.5
-                      }}>
-                        Status: {fbData.attests[selectedAttest].status}
-                      </div>
-                    </div>
-                  </div>
-
-                  <p style={{fontSize:14, color:"#4B5563", lineHeight:1.6, marginBottom:20}}>
-                    {fbData.attests[selectedAttest].description}
-                  </p>
-
-                  <div style={{background:ORBG, borderRadius:14, padding:16, marginBottom:20}}>
-                    <h4 style={{fontSize:13, fontWeight:900, color:"#2D1B00", marginBottom:12, display:"flex", alignItems:"center", gap:6}}>
-                      <span>🎯</span> {selectedAttest === fbData.predictedAttest ? "Hoe behoud ik dit?" : "Wat moet ik doen?"}
-                    </h4>
-                    <ul style={{margin:0, paddingLeft:20, fontSize:13, color:"#5D3D1A"}}>
-                      {fbData.attests[selectedAttest].actionPlan.map((step, i) => (
-                        <li key={i} style={{marginBottom:8, fontWeight:700}}>{step}</li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  <div style={{borderTop:"1px solid #E5E7EB", paddingTop:16}}>
-                    <h4 style={{fontSize:13, fontWeight:900, color:"#2D1B00", marginBottom:8}}>
-                      ⚠️ Gevolgen
-                    </h4>
-                    <p style={{fontSize:12, color:"#6B7280", fontStyle:"italic", margin:0}}>
-                      {fbData.attests[selectedAttest].consequences}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-            </div>
-          )}
+          <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
+            borderRadius:16,padding:"16px 20px",marginBottom:16}}>
+            <div style={{fontSize:22,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
+            <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
+          </div>
 
           <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
             <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
@@ -2328,15 +1891,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             </button>
           </div>
 
-          {fbData && (
-            <button 
-              style={{ ...S.btn, background: "#3B82F6", boxShadow: "0 8px 24px rgba(59, 130, 246, 0.3)" }} 
-              onClick={() => setScreen("game")}
-            >
-              🎯 Bekijk Focus Checklist
-            </button>
-          )}
-
           <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
           <Disclaimer />
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
@@ -2348,7 +1902,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
               setGedragAntw({});
               setNederlandsAntw({});
               setScore(null);
-              setFbData(null);
               setReportImage(null);
               setScreen("grades");
             }}>
@@ -2437,30 +1990,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   };
 
   // ── 13. GAME SCREEN (GAMIFICATION HUB) ─────────────────────
-  const BadgeNotification = () => {
-    if (!newBadge) return null;
-    return (
-      <motion.div
-        initial={{ y: 100, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        exit={{ y: 100, opacity: 0 }}
-        style={{
-          position: "fixed", bottom: 40, left: "50%", transform: "translateX(-50%)",
-          zIndex: 2000, background: "white", padding: "16px 24px", borderRadius: 24,
-          boxShadow: "0 10px 25px rgba(0,0,0,0.2)", display: "flex", alignItems: "center", gap: 16,
-          border: `2px solid ${OR}`, width: "90%", maxWidth: 400
-        }}
-      >
-        <div style={{ fontSize: 40 }}>{newBadge.name.split(' ').pop()}</div>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 800, color: OR, textTransform: "uppercase" }}>Nieuwe Badge Behaald! 🏆</div>
-          <div style={{ fontSize: 18, fontWeight: 900, color: "#2D1B00" }}>{newBadge.name}</div>
-          <div style={{ fontSize: 13, color: "#8B6242" }}>{newBadge.description}</div>
-        </div>
-      </motion.div>
-    );
-  };
-
   const GameScreen = () => {
     const xp = currentUser?.xp || 0;
     const rank = getRankInfo(xp);
@@ -2514,63 +2043,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             )}
           </div>
         </div>
-
-        {/* Focus Checklist */}
-        {currentUser?.focusPoints && currentUser.focusPoints.length > 0 && (
-          <div style={{...S.card, padding: 24, marginBottom: 20}}>
-            <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
-              <span style={{fontSize: 24}}>🎯</span> Focus Checklist
-            </h3>
-            <p style={{...S.sub, marginBottom: 20}}>Voltooi deze doelen om extra XP te verdienen en sneller te stijgen in rang! Elke analyse voegt nieuwe doelen toe.</p>
-            <div style={{ 
-              display: "flex", 
-              flexDirection: "column", 
-              gap: 12,
-              maxHeight: 400, // Iets groter nu er meer doelen kunnen zijn
-              overflowY: "auto",
-              paddingRight: 8,
-              scrollbarWidth: "thin",
-              scrollbarColor: `${OR} #F1F5F9`
-            }}>
-              {[...(currentUser.focusPoints || [])]
-                .sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1))
-                .map((p: any) => (
-                <motion.div 
-                  key={p.id} 
-                  layout
-                  whileTap={{ scale: 0.98 }}
-                  onClick={() => toggleFocusPoint(p.id)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 14, padding: "16px 20px",
-                    background: p.completed ? "#F0FDF4" : "#F8FAFC",
-                    borderRadius: 20, cursor: "pointer", transition: "all .2s",
-                    border: `2px solid ${p.completed ? "#DCFCE7" : "#F1F5F9"}`,
-                    boxShadow: p.completed ? "none" : "0 2px 8px rgba(0,0,0,0.02)"
-                  }}
-                >
-                  <div style={{
-                    width: 28, height: 28, borderRadius: 10, border: `2.5px solid ${p.completed ? "#22C55E" : ORPL}`,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    background: p.completed ? "#22C55E" : "white", color: "white", fontSize: 16
-                  }}>
-                    {p.completed && "✓"}
-                  </div>
-                  <div style={{ flex: 1, fontSize: 15, fontWeight: 700, color: p.completed ? "#166534" : "#2D1B00", textDecoration: p.completed ? "line-through" : "none" }}>
-                    {p.text}
-                  </div>
-                  {!p.completed && (
-                    <div style={{ 
-                      fontSize: 11, fontWeight: 800, color: OR, background: ORBG, 
-                      padding: "4px 10px", borderRadius: 10, border: `1px solid ${ORPL}` 
-                    }}>
-                      +{p.xpValue} XP
-                    </div>
-                  )}
-                </motion.div>
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Badges Section */}
         <div style={{...S.card, padding: 24, marginBottom: 20}}>
@@ -2822,7 +2294,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const handleLogout = async () => {
     await signOut(auth);
     setSchool(""); setJaar(""); setLeeftijd(""); setVakken([]);
-    setGedragAntw({}); setNederlandsAntw({}); setScore(null); setFbData(null); setReportImage(null);
+    setGedragAntw({}); setNederlandsAntw({}); setScore(null); setReportImage(null);
   };
 
   return (
@@ -2841,7 +2313,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       <Blobs/>
       <SettingsModal/>
       <ProfileCard/>
-      <BadgeNotification/>
       <TutorialModal/>
 
       <div style={S.wrap} key={screen} className="animate-in">
@@ -2895,7 +2366,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       <FeedbackModal />
       <SettingsModal />
       <ProfileCard />
-      <BadgeNotification />
 
       {/* Subtle floating feedback button */}
       {currentUser && (

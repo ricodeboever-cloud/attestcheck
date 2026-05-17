@@ -23,30 +23,6 @@ export interface Vak {
   isHoofdvak: boolean;
 }
 
-export interface FocusPoint {
-  id: string;
-  text: string;
-  completed: boolean;
-  xpValue: number;
-  createdAt: string;
-}
-
-export interface FeedbackData {
-  predictedAttest: "A" | "B" | "C";
-  attests: {
-    [key in "A" | "B" | "C"]: {
-      status: string;
-      title: string;
-      description: string;
-      actionPlan: string[];
-      consequences: string;
-      emoji: string;
-    };
-  };
-  motivation: string;
-  focusPoints: string[];
-}
-
 export interface UserProfile {
   uid: string;
   naam?: string;
@@ -61,7 +37,6 @@ export interface UserProfile {
   score?: number;
   xp?: number;
   rank?: string;
-  focusPoints?: FocusPoint[];
 }
 
 interface AppContextType {
@@ -83,12 +58,6 @@ interface AppContextType {
   setNederlandsAntw: (a: any) => void;
   score: number | null;
   setScore: (s: number | null) => void;
-  fbData: FeedbackData | null;
-  setFbData: (d: FeedbackData | null) => void;
-  fbLoad: boolean;
-  setFbLoad: (l: boolean) => void;
-  fbError: string;
-  setFbError: (e: string) => void;
   reportImage: string | null;
   setReportImage: (i: string | null) => void;
   reportMimeType: string | null;
@@ -99,8 +68,6 @@ interface AppContextType {
   setSaveSuccess: (s: boolean) => void;
   hasApiKey: boolean;
   setHasApiKey: (h: boolean) => void;
-  selectedAttest: "A" | "B" | "C" | null;
-  setSelectedAttest: (a: "A" | "B" | "C" | null) => void;
   showSettings: boolean;
   setShowSettings: (s: boolean) => void;
   showProfile: boolean;
@@ -115,9 +82,7 @@ interface AppContextType {
   feedbackSuccess: boolean;
   setFeedbackSuccess: (s: boolean) => void;
   submitFeedback: () => Promise<void>;
-  toggleFocusPoint: (id: string) => Promise<void>;
   getAttest: (s: number) => { label: string; kleur: string; emoji: string; tekst: string };
-  vraagFeedback: () => Promise<void>;
   saveTodayScore: () => Promise<void>;
   logout: () => Promise<void>;
   checkApiKey: () => Promise<void>;
@@ -126,43 +91,6 @@ interface AppContextType {
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
@@ -175,15 +103,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [gedragAntw, setGedragAntw] = useState<any>({});
   const [nederlandsAntw, setNederlandsAntw] = useState<any>({});
   const [score, setScore] = useState<number | null>(null);
-  const [fbData, setFbData] = useState<FeedbackData | null>(null);
-  const [fbLoad, setFbLoad] = useState(false);
-  const [fbError, setFbError] = useState("");
   const [reportImage, setReportImage] = useState<string | null>(null);
   const [reportMimeType, setReportMimeType] = useState<string | null>(null);
   const [progression, setProgression] = useState<any[]>([]);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
-  const [selectedAttest, setSelectedAttest] = useState<"A" | "B" | "C" | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
@@ -216,106 +140,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { label: "Attest C", kleur: "#EF4444", emoji: "📌", tekst: "Je slaagt momenteel niet. Je zal dit jaar moeten overdoen of van richting veranderen." };
   };
 
-  const vraagFeedback = async () => {
-    if (score === null) return;
-    setFbLoad(true);
-    setFbError("");
-    try {
-      const ingevuld = vakken.filter(v => v.punt !== "" && !isNaN(parseFloat(v.punt)));
-      const vakInfo = ingevuld.map(v => {
-        const p = Math.round((parseFloat(v.punt) / parseFloat(v.maxPunt)) * 100);
-        return `${v.naam}${v.isHoofdvak ? " (HOOFDVAK ⭐)" : ""}: ${v.punt}/${v.maxPunt} (${p}%)`;
-      }).join(", ");
-      const gedragInfo = CONFIG.gedragsVragen.map(v =>
-        gedragAntw[v.id] ? `${v.vraag}: ${gedragAntw[v.id]}/5` : ""
-      ).filter(Boolean).join("; ");
-
-      const nedInfo = CONFIG.nederlandsVragen.map(v =>
-        nederlandsAntw[v.id] ? `${v.vraag}: ${nederlandsAntw[v.id]}` : ""
-      ).filter(Boolean).join("; ");
-
-      const attest = getAttest(score);
-      const prompt = `Je bent een deskundige Belgische schoolcoach (expert in het Vlaamse onderwijssysteem).
-Analyseer de resultaten van ${currentUser?.naam || "de student"} (${jaar}).
-Eindscore: ${score}% → Huidig voorspeld attest: ${attest.label}
-
-Context:
-- Punten tellen voor 88%, gedrag voor 12%.
-- Hoofdvakken (⭐) tellen 3x zwaarder.
-- Nederlands niveau (impact +/- 3%): ${nedInfo}
-- Vakken: ${vakInfo}
-- Gedrag: ${gedragInfo}
-
-Terminologie-hulp:
-- Attest A: Geslaagd. Attest B: Geslaagd, maar met uitsluiting van bepaalde richtingen. Attest C: Niet geslaagd.
-
-Geef uitvoerige maar hapklare feedback in JSON formaat.
-Bepaal welk attest (A, B of C) de student momenteel zou krijgen.
-Geef voor ELK van de drie attesten (A, B en C) een analyse:
-1. status: 'behaald' (huidig), 'mogelijk' (verbetering), 'gevaar' (verslechtering).
-2. title: Pakkende titel.
-3. description: Wat betekent dit specifiek voor deze student?
-4. actionPlan: 3-4 concrete stappen om dit te bereiken/behouden.
-5. consequences: Gevolgen van dit attest.
-6. emoji: Passende emoji.
-Voeg ook een algemene 'motivation' toe. Dit moet een ZEER KORTE en KRACHTIGE samenvatting zijn (max 10 woorden) die de essentie van het rapport vat en de student direct raakt.
-Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 10 woorden per doel) die de student zelf kan afvinken (bijv. 'Elke dag 15 min woordjes Frans leren').`;
-
-      const res = await fetch("/api/get-feedback", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt,
-          image: reportImage,
-          mimeType: reportMimeType
-        })
-      });
-
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || "Fout bij de AI coach");
-      }
-
-      const { text } = await res.json();
-      if (!text) throw new Error("Geen tekst ontvangen van de coach.");
-
-      const data = JSON.parse(text) as FeedbackData;
-      if (!data.predictedAttest || !data.attests) throw new Error("Ongeldige data ontvangen.");
-
-      if (data.focusPoints && currentUser) {
-        const newFocusPoints: FocusPoint[] = data.focusPoints.map((text, i) => ({
-          id: `fp_${Date.now()}_${i}`,
-          text,
-          completed: false,
-          xpValue: 20,
-          createdAt: new Date().toISOString()
-        }));
-
-        const updatedUser = {
-          ...currentUser,
-          focusPoints: newFocusPoints,
-          xp: (currentUser.xp || 0) + 50,
-          rank: getRankInfo((currentUser.xp || 0) + 50).name
-        };
-        await setDoc(doc(db, "users", currentUser.uid), updatedUser);
-        setCurrentUser(updatedUser);
-      }
-
-      setFbData(data);
-      setSelectedAttest(data.predictedAttest);
-    } catch (error: any) {
-      console.error("AI Feedback Error:", error);
-      let msg = "Oeps! De coach kon je rapport even niet lezen. Probeer het nog eens! 🔄";
-      if (error?.message?.includes("API key") || error?.message?.includes("403") || error?.message?.includes("permission")) {
-        msg = "De coach heeft geen toegang tot de AI. Controleer of de GEMINI_API_KEY correct is ingesteld in de instellingen.";
-      } else if (error?.message?.includes("quota") || error?.message?.includes("429")) {
-        msg = "De coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het opnieuw.";
-      }
-      setFbError(msg);
-    }
-    setFbLoad(false);
-  };
-
   const saveTodayScore = async () => {
     if (!currentUser || score === null) return;
     const today = new Date().toISOString().split('T')[0];
@@ -335,25 +159,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       setSaveSuccess(true);
     } catch (e) {
       console.error(e);
-    }
-  };
-
-  const toggleFocusPoint = async (id: string) => {
-    if (!currentUser || !currentUser.focusPoints) return;
-    const newPoints = currentUser.focusPoints.map(p => {
-      if (p.id === id && !p.completed) {
-        return { ...p, completed: true };
-      }
-      return p;
-    });
-    
-    const point = currentUser.focusPoints.find(p => p.id === id);
-    if (point && !point.completed) {
-      const newXp = (currentUser.xp || 0) + point.xpValue;
-      const newRank = getRankInfo(newXp).name;
-      const updatedUser = { ...currentUser, focusPoints: newPoints, xp: newXp, rank: newRank };
-      await setDoc(doc(db, "users", currentUser.uid), updatedUser);
-      setCurrentUser(updatedUser);
     }
   };
 
@@ -385,9 +190,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
         setLoading(true);
-        const userPath = `users/${fbUser.uid}`;
         try {
-          // Attempt to fetch from server first to bypass potential permission/cache issues
           const snap = await getDocFromServer(doc(db, "users", fbUser.uid));
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
@@ -405,7 +208,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
           }
         } catch (error) {
           console.warn("Firestore access error, falling back to basic profile:", error);
-          // Set basic user so app stays usable
           setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
         }
       } else {
@@ -427,15 +229,11 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       gedragAntw, setGedragAntw,
       nederlandsAntw, setNederlandsAntw,
       score, setScore,
-      fbData, setFbData,
-      fbLoad, setFbLoad,
-      fbError, setFbError,
       reportImage, setReportImage,
       reportMimeType, setReportMimeType,
       progression, setProgression,
       saveSuccess, setSaveSuccess,
       hasApiKey, setHasApiKey,
-      selectedAttest, setSelectedAttest,
       showSettings, setShowSettings,
       showProfile, setShowProfile,
       showFeedback, setShowFeedback,
@@ -443,9 +241,7 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
       feedbackMsg, setFeedbackMsg,
       feedbackLoading, feedbackSuccess, setFeedbackSuccess,
       submitFeedback,
-      toggleFocusPoint,
       getAttest,
-      vraagFeedback,
       saveTodayScore,
       logout, checkApiKey, getApiKey,
       loading
