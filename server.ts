@@ -89,7 +89,7 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
   }
 
   // All models failed
-  let friendlyMessage = "De AI kon het rapport niet analyseren.";
+  let friendlyMessage = "Het systeem kon het rapport niet analyseren.";
   if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
     friendlyMessage = "De AI service is tijdelijk overbelast. Wacht een minuutje en probeer het dan nog eens.";
   } else if (lastError?.status === 401 || lastError?.status === 403 || lastError?.message?.includes("API key")) {

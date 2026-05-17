@@ -10,17 +10,16 @@ const SmileyIcon: React.FC<SmileyIconProps> = ({ size = 64, style }) => {
     <div style={{ width: size, height: size, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', ...style }}>
       <svg width="100%" height="100%" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
         {/* Main body */}
-        <rect x="10" y="5" width="80" height="90" rx="12" fill="#F47920" />
+        <rect x="10" y="10" width="80" height="80" rx="12" fill="#F47920" />
         
-        {/* Folded corner */}
-        <path d="M70 5L90 25H82C75.3726 25 70 19.6274 70 13V5Z" fill="#B45309" opacity="0.8" />
+        {/* Radar circles */}
+        <circle cx="50" cy="50" r="30" stroke="white" strokeWidth="4" strokeOpacity="0.4" fill="none" />
+        <circle cx="50" cy="50" r="15" stroke="white" strokeWidth="4" strokeOpacity="0.6" fill="none" />
         
-        {/* Eyes */}
-        <circle cx="35" cy="45" r="7" fill="white" />
-        <circle cx="65" cy="45" r="7" fill="white" />
-        
-        {/* Smile */}
-        <path d="M30 65C30 65 40 78 50 78C60 78 70 65 70 65" stroke="white" strokeWidth="5" strokeLinecap="round" fill="none" />
+        {/* Scanning line */}
+        <line x1="50" y1="50" x2="80" y2="50" stroke="white" strokeWidth="4" strokeLinecap="round" opacity="0.8">
+          <animateTransform attributeName="transform" type="rotate" from="0 50 50" to="360 50 50" dur="2s" repeatCount="indefinite" />
+        </line>
         
         {/* Bottom line with dots */}
         <line x1="15" y1="88" x2="85" y2="88" stroke="#FFEDD5" strokeWidth="3" strokeLinecap="round" />

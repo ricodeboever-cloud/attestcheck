@@ -36,6 +36,9 @@ export interface UserProfile {
   score?: number;
   xp?: number;
   rank?: string;
+  progression?: any[];
+  badges?: string[];
+  customBadges?: any[];
 }
 
 interface AppContextType {

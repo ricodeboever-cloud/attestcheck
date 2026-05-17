@@ -466,90 +466,6 @@ function AttestatieApp() {
     }
   };
 
-  /**
-   * Fallback Logic: Probeert verschillende modellen in volgorde als de quota op is.
-   */
-  const callGeminiWithFallback = async (params: any, retriesPerModel = 3): Promise<any> => {
-    const models = [
-      "gemini-1.5-flash", 
-      "gemini-2.0-flash", 
-      "gemini-1.5-flash-8b", 
-      "gemini-1.5-pro"
-    ];
-
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      if (window.aistudio) {
-        await window.aistudio.openSelectKey();
-        setHasApiKey(true);
-        // Geen return hier, we proberen het met de nieuwe sleutel (die in process.env komt)
-      } else {
-        throw new Error("Geen API-sleutel geconfigureerd. Voeg VITE_GEMINI_API_KEY toe.");
-      }
-    }
-    
-    const ai = new GoogleGenAI({ apiKey: getApiKey() || "" });
-
-    for (const modelName of models) {
-      let attempts = 0;
-      while (attempts < retriesPerModel) {
-        try {
-          console.log(`AI aanroep met model: ${modelName} (Poging ${attempts + 1})`);
-          const response = await ai.models.generateContent({
-            ...params,
-            model: modelName,
-            config: {
-              ...params.config,
-              safetySettings: [
-                { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
-                { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
-              ]
-            }
-          });
-          return response;
-        } catch (error: any) {
-          console.warn(`Fout bij model ${modelName}:`, error);
-          const msg = error?.message || "";
-          const status = error?.status;
-          
-          const isRateLimit = msg.includes("quota") || msg.includes("429") || status === 429;
-          const isTransient = msg.includes("fetch") || msg.includes("network") || msg.includes("deadline") || msg.includes("500") || msg.includes("503");
-          const isNotFoundError = msg.includes("Requested entity was not found");
-
-          if (isNotFoundError && window.aistudio) {
-            console.error("API Key error: Requested entity not found. Re-opening key selector...");
-            setHasApiKey(false);
-            await window.aistudio.openSelectKey();
-            setHasApiKey(true);
-            // Probeer het opnieuw met de nieuwe sleutel
-            attempts++;
-            continue;
-          }
-
-          if (isRateLimit || isTransient) {
-            if (attempts < retriesPerModel - 1) {
-              const delay = isRateLimit ? 2500 : 1000;
-              console.warn(`Transient/Rate limit op ${modelName}. Retry over ${delay}ms...`);
-              await new Promise(res => setTimeout(res, delay));
-              attempts++;
-              continue;
-            } else {
-              console.warn(`Model ${modelName} mislukt na ${retriesPerModel} pogingen. Schakel over...`);
-              break; 
-            }
-          }
-          
-          // Andere fatale fout?
-          throw error;
-        }
-      }
-    }
-    throw new Error("Alle beschikbare AI-modellen hebben hun limiet bereikt of geven fouten. Probeer het over een minuutje opnieuw.");
-  };
-
   const [authError, setAuthError] = useState("");
 
   const handleAuthError = (error: any) => {
@@ -999,7 +915,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       setGedragAntw({});
       setNederlandsAntw({});
       setScore(null);
-      setFbData(null);
       setReportImage(null);
       setScreen("grades");
     };
@@ -1023,7 +938,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             style={{ ...S.btn, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
             onClick={() => setScreen("game")}
           >
-            Mijn Spel & Progressie 🎮
+            Mijn Groei & Progressie 📊
           </button>
           
           <Disclaimer mini />
@@ -1218,7 +1133,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   // ── 5. HOOFDVAKKEN ─────────────────────────────────────────
   const ImportantSubjectsScreen = () => {
     const [lv, setLv] = useState([...vakken]);
-    const toggle = (id: number) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
+    const toggle = (id: string | number) => setLv(lv.map(v=>v.id===id?{...v,isHoofdvak:!v.isHoofdvak}:v));
     const verder = async () => {
       try {
         if (currentUser?.uid) {
@@ -1396,7 +1311,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         }
       } catch (error: any) {
         console.error("AI OCR Error (Grades):", error);
-        setOcrFout("De coach kon je rapport niet scannen: " + (error.message || "Probeer het later opnieuw."));
+        setOcrFout("Systeem kon je rapport niet scannen: " + (error.message || "Probeer het later opnieuw."));
       } finally {
         setOcrLoading(false);
         e.target.value = "";

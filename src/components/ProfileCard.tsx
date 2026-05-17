@@ -55,18 +55,11 @@ const ProfileCard: React.FC = () => {
           )}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
           <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
             <div style={{ fontSize: 20, marginBottom: 4 }}>📈</div>
             <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Metingen</div>
             <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>{progression.length}</div>
-          </div>
-          <div style={{ background: "#F8FAFC", padding: 12, borderRadius: 16 }}>
-            <div style={{ fontSize: 20, marginBottom: 4 }}>🎯</div>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#64748B" }}>Focus Doelen</div>
-            <div style={{ fontSize: 16, fontWeight: 900, color: "#1E293B" }}>
-              {currentUser.focusPoints?.filter((p: any) => p.completed).length || 0}
-            </div>
           </div>
         </div>
       </motion.div>
