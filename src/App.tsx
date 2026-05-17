@@ -1749,6 +1749,71 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       );
     };
 
+    const AttestInfo = ({ score }: { score: number }) => {
+      const isA = score >= CONFIG.attestA_drempel;
+      const isB = score >= CONFIG.attestB_drempel && score < CONFIG.attestA_drempel;
+      const isC = score < CONFIG.attestB_drempel;
+
+      return (
+        <div style={{ 
+          marginTop: 20, 
+          padding: 20, 
+          background: "linear-gradient(135deg, #FFFFFF, #F8FAFC)", 
+          borderRadius: 24, 
+          border: "1px solid #E2E8F0",
+          boxShadow: "0 4px 12px rgba(0,0,0,0.03)"
+        }}>
+          <h3 style={{ fontSize: 16, fontWeight: 800, color: "#1E293B", marginBottom: 16, display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 20 }}>💡</span> Hoe werkt jouw groei?
+          </h3>
+          
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Beter doen */}
+            <div style={{ display: "flex", gap: 14, opacity: isA ? 1 : 0.7 }}>
+              <div style={{ 
+                width: 40, height: 40, borderRadius: 12, background: "#DCFCE7", 
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 
+              }}>📈</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#166534" }}>Naar Attest A (70%+)</div>
+                <p style={{ fontSize: 12, color: "#475569", margin: "2px 0 0", lineHeight: 1.5 }}>
+                  Zorg dat je overal de helft haalt én je gemiddelde boven de 70% tilt. Focus op je hoofdvakken!
+                </p>
+              </div>
+            </div>
+
+            {/* Behouden */}
+            <div style={{ display: "flex", gap: 14, opacity: isB ? 1 : 0.7 }}>
+              <div style={{ 
+                width: 40, height: 40, borderRadius: 12, background: "#FEF3C7", 
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 
+              }}>⚖️</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#92400E" }}>Behouden (50% - 70%)</div>
+                <p style={{ fontSize: 12, color: "#475569", margin: "2px 0 0", lineHeight: 1.5 }}>
+                  Zit je hier? Dan mag je over (Attest B), maar let op voor vakken waar je minder dan 50% haalt.
+                </p>
+              </div>
+            </div>
+
+            {/* Risico */}
+            <div style={{ display: "flex", gap: 14, opacity: isC ? 1 : 0.7 }}>
+              <div style={{ 
+                width: 40, height: 40, borderRadius: 12, background: "#FEE2E2", 
+                display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 
+              }}>⚠️</div>
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: "#991B1B" }}>Risico op C (Onder 50%)</div>
+                <p style={{ fontSize: 12, color: "#475569", margin: "2px 0 0", lineHeight: 1.5 }}>
+                  Als je te veel tekorten hebt of onder de 50% zakt, moet je het jaar waarschijnlijk overdoen.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     return (
       <div>
         <StapBar huidig="results"/>
@@ -1766,7 +1831,9 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
           </div>
 
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
+          <AttestInfo score={anim} />
+
+          <div style={{ display: "flex", gap: 10, marginTop: 20, marginBottom: 12 }}>
             <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
             <button 
               style={{ ...S.btn, flex: 1, background: saveSuccess ? "#22C55E" : OR }} 
