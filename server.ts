@@ -19,45 +19,58 @@ if (!apiKey) {
 }
 const genAI = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
 
-// Helper to call Gemini with retries and cleaner errors
+// Helper to call Gemini with a stable method and cleaner errors
 async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
-  const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
-  let lastError: any = null;
-
-  for (const modelName of models) {
+  const modelName = "gemini-1.5-flash";
+  let retries = 2;
+  
+  while (retries >= 0) {
     try {
-      const result = await genAI.models.generateContent({
+      const model = genAI.getGenerativeModel({ 
         model: modelName,
-        contents: params.contents,
-        config: {
+        generationConfig: {
           ...params.config,
           responseSchema: params.schema,
+          temperature: 0.1,
         }
       });
-      return result.text;
+
+      const result = await model.generateContent({
+        contents: params.contents,
+      });
+      
+      const text = result.response.text();
+      if (!text) throw new Error("De AI gaf geen antwoord terug.");
+      return text;
     } catch (error: any) {
-      lastError = error;
-      console.warn(`Model ${modelName} failed, trying next...`, error.status || error.message);
-      // If it's a quota error (429), it might apply to all models, but we still try others just in case
-      continue;
+      console.error(`Gemini Error (${modelName}, retries left: ${retries}):`, error.status || error.message);
+      
+      if (retries > 0 && (error.status === 429 || error.status >= 500)) {
+        retries--;
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2s before retry
+        continue;
+      }
+
+      let friendlyMessage = "De AI coach heeft op dit moment een klein probleem.";
+      
+      if (error.status === 429 || error.message?.includes("429") || error.message?.includes("quota")) {
+        friendlyMessage = "De AI coach is even overbelast (limiet bereikt). Wacht een minuutje en probeer het dan nog eens.";
+      } else if (error.status === 401 || error.status === 403 || error.message?.includes("API key")) {
+        friendlyMessage = "Er is een probleem met de API-sleutel. Controleer de instellingen.";
+      } else if (error.message?.includes("Safety")) {
+        friendlyMessage = "De AI coach kon dit niet lezen vanwege veiligheidsfilters. Probeer een andere foto.";
+      }
+
+      throw new Error(friendlyMessage);
     }
   }
-
-  // If we get here, all models failed
-  let friendlyMessage = "De AI coach is op dit moment niet bereikbaar.";
-  if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
-    friendlyMessage = "De AI coach heeft zijn limiet voor vandaag bereikt of is even overbelast. Wacht een minuutje of probeer het morgen opnieuw.";
-  } else if (lastError?.status === 401 || lastError?.status === 403) {
-    friendlyMessage = "Er is een probleem met de toegang (API-sleutel). Controleer de instellingen.";
-  }
-  
-  throw new Error(friendlyMessage);
+  throw new Error("De AI coach is momenteel niet bereikbaar.");
 }
 
 // API Routes
 app.post("/api/analyze-report", async (req, res) => {
   if (!apiKey) {
-    return res.status(401).json({ error: "De AI coach is nog niet geconfigureerd. Voeg een GEMINI_API_KEY toe aan de Secrets." });
+    return res.status(401).json({ error: "API-sleutel ontbreekt." });
   }
   try {
     const { parts } = req.body;
@@ -65,7 +78,18 @@ app.post("/api/analyze-report", async (req, res) => {
       contents: [{ role: "user", parts }],
       config: {
         responseMimeType: "application/json",
-        temperature: 0.1,
+      },
+      schema: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            naam: { type: Type.STRING },
+            punt: { type: Type.STRING },
+            maxPunt: { type: Type.STRING }
+          },
+          required: ["naam", "punt", "maxPunt"]
+        }
       }
     });
 
