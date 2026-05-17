@@ -2,7 +2,6 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { GoogleGenAI, Type } from "@google/genai";
 import { CONFIG, getRankInfo, RANKS } from '../constants';
 
 declare global {

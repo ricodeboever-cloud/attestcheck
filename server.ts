@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { createClient, Type } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -18,7 +18,7 @@ if (!apiKey) {
   console.warn("GEMINI_API_KEY is not set. AI features will fail.");
 }
 
-const client = createClient({ 
+const ai = new GoogleGenAI({ 
   apiKey: apiKey || "MISSING_KEY",
   httpOptions: {
     headers: {
@@ -30,7 +30,7 @@ const client = createClient({
 // Helper to call Gemini with a fallback model list and cleaner errors
 async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
   const modelsToTry = [
-    "gemini-1.5-flash", 
+    "gemini-3-flash-preview",
     "gemini-2.0-flash", 
     "gemini-1.5-flash-8b", 
     "gemini-1.5-pro"
@@ -39,17 +39,17 @@ async function callGemini(params: { contents: any[], config?: any, schema?: any 
 
   for (const modelName of modelsToTry) {
     try {
-      console.log(`Trying AI model: ${modelName} with @google/genai Unified SDK...`);
+      console.log(`Trying AI model: ${modelName} with @google/genai...`);
       
-      const response = await client.models.generateContent({
+      const response = await ai.models.generateContent({
         model: modelName,
         contents: params.contents,
         config: {
           ...params.config,
-          response_schema: params.schema,
-          response_mime_type: params.config?.responseMimeType || params.config?.response_mime_type || "text/plain",
+          responseSchema: params.schema,
+          responseMimeType: params.config?.responseMimeType || params.config?.response_mime_type || "text/plain",
           temperature: 0.7,
-          safety_settings: [
+          safetySettings: [
             { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
             { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },

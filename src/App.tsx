@@ -16,7 +16,6 @@ import {
   serverTimestamp
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
-import { GoogleGenAI, Type } from "@google/genai";
 import Markdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
@@ -368,34 +367,6 @@ function AttestatieApp() {
     }
   };
 
-  const toggleFocusPoint = async (pointId: string) => {
-    if (!currentUser) return;
-    const points = [...(currentUser.focusPoints || [])];
-    const idx = points.findIndex(p => p.id === pointId);
-    if (idx === -1) return;
-
-    const point = points[idx];
-    const wasCompleted = point.completed;
-    point.completed = !wasCompleted;
-
-    try {
-      const updatedXP = (currentUser.xp || 0) + (point.completed ? point.xpValue : -point.xpValue);
-      const updatedUser = cleanUserForFirestore({ 
-        ...currentUser, 
-        focusPoints: points,
-        xp: updatedXP,
-        rank: getRankInfo(updatedXP).name
-      });
-      await setDoc(doc(db, "users", currentUser.uid), updatedUser);
-      setCurrentUser(updatedUser);
-      if (point.completed) {
-        checkBadges(updatedUser, progression);
-        generateNewFocusPoint(updatedUser);
-      }
-    } catch (error) {
-      console.error("Error toggling focus point:", error);
-    }
-  };
 
   useEffect(() => {
     if (currentUser && screen === "progression") {
