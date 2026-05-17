@@ -227,23 +227,47 @@ const ORBG = "#FFF5EC";
 const ORPL = "#FFE4C4";
 
 function AttestatieApp() {
-  const { setShowFeedback, setShowSettings, setShowProfile } = useApp();
-  const [screen,        setScreen]       = useState("loading");
-  const [currentUser,   setCurrentUser]  = useState<any>(null);
-  const [school,        setSchool]       = useState("");
-  const [jaar,          setJaar]         = useState("");
-  const [leeftijd,      setLeeftijd]     = useState("");
-  const [richting,      setRichting]     = useState("");
-  const [vakken,        setVakken]       = useState<any[]>([]);
-  const [gedragAntw,    setGedragAntw]   = useState<any>({});
-  const [nederlandsAntw, setNederlandsAntw] = useState<any>({});
-  const [score,         setScore]        = useState<number | null>(null);
-  const [fbData,        setFbData]       = useState<FeedbackData | null>(null);
-  const [selectedAttest, setSelectedAttest] = useState<"A" | "B" | "C" | null>(null);
-  const [fbLoad,        setFbLoad]       = useState(false);
-  const [fbError,       setFbError]      = useState("");
-  const [reportImage,   setReportImage]  = useState<string | null>(null);
-  const [hasApiKey,     setHasApiKey]    = useState(true);
+  const { 
+    setShowFeedback, 
+    setShowSettings, 
+    setShowProfile,
+    currentUser,
+    setCurrentUser,
+    school,
+    setSchool,
+    jaar,
+    setJaar,
+    leeftijd,
+    setLeeftijd,
+    richting,
+    setRichting,
+    vakken,
+    setVakken,
+    gedragAntw,
+    setGedragAntw,
+    nederlandsAntw,
+    setNederlandsAntw,
+    score,
+    setScore,
+    selectedAttest,
+    setSelectedAttest,
+    fbData,
+    setFbData,
+    fbLoad,
+    setFbLoad,
+    fbError,
+    setFbError,
+    reportImage,
+    setReportImage,
+    hasApiKey,
+    setHasApiKey,
+    progression,
+    setProgression,
+    saveSuccess,
+    setSaveSuccess
+  } = useApp();
+
+  const [screen, setScreen] = useState("loading");
   
   // Grades Screen State (Elevated to prevent remount reset)
   const [grades_lv, setGrades_lv] = useState<any[]>([]);
@@ -252,9 +276,7 @@ function AttestatieApp() {
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [progression,    setProgression]   = useState<any[]>([]);
   const [progressionLoading, setProgressionLoading] = useState(false);
-  const [saveSuccess,    setSaveSuccess]   = useState(false);
   const [newBadge,       setNewBadge]      = useState<any>(null);
 
   // ── 9. PROGRESSIE LOGICA ──────────────────────────────
@@ -871,11 +893,6 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
   useEffect(() => {
     checkApiKey();
 
-    // Veiligheidstimer: forceer het scherm naar 'welcome' als het na 6 seconden nog op 'loading' staat
-    const startupTimer = setTimeout(() => {
-      setScreen(prev => prev === "loading" ? "welcome" : prev);
-    }, 6000);
-
     if (!document.getElementById("nunito-link")) {
       const lnk = document.createElement("link");
       lnk.id   = "nunito-link";
@@ -888,54 +905,30 @@ Voeg ook een lijst 'focusPoints' toe met exact 5 concrete, haalbare en diverse d
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
       } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
-        }
+        // Silent fail for test connection
       }
     }
     testConnection();
-
-    // Luister naar login/logout events van Firebase
-    const unsub = onAuthStateChanged(auth, async (fbUser) => {
-      console.log("Auth state changed:", fbUser?.uid ? "Logged in" : "Logged out");
-      if (fbUser) {
-        try {
-          const snap = await getDoc(doc(db, "users", fbUser.uid));
-          if (snap.exists()) {
-            const data = snap.data();
-            console.log("User data found in Firestore");
-            setCurrentUser({ uid: fbUser.uid, ...data });
-            if (data.school)   setSchool(data.school);
-            if (data.jaar)     setJaar(data.jaar);
-            if (data.leeftijd) setLeeftijd(data.leeftijd);
-            if (data.richting) setRichting(data.richting);
-            if (data.vakken)   setVakken(data.vakken);
-            if (data.gedragAntw) setGedragAntw(data.gedragAntw);
-            if (data.nederlandsAntw) setNederlandsAntw(data.nederlandsAntw);
-            if (data.score !== undefined) setScore(data.score);
-            
-            setScreen("dashboard");
-          } else {
-            console.log("No user document in Firestore, using defaults");
-            setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
-            setScreen("dashboard");
-          }
-        } catch (error) {
-          console.warn("Error fetching user doc during auth change:", error);
-          setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
-          setScreen("dashboard");
-        }
-      } else {
-        setCurrentUser(null);
-        setScreen("welcome");
-      }
-    });
-
-    return () => {
-      unsub();
-      clearTimeout(startupTimer);
-    };
   }, []);
+
+  useEffect(() => {
+    if (screen === "loading") {
+      const startupTimer = setTimeout(() => {
+        if (currentUser) {
+          setScreen("dashboard");
+        } else {
+          setScreen("welcome");
+        }
+      }, 1000);
+      return () => clearTimeout(startupTimer);
+    } else {
+      if (!currentUser && screen !== "welcome") {
+        setScreen("welcome");
+      } else if (currentUser && screen === "welcome") {
+        setScreen("dashboard");
+      }
+    }
+  }, [currentUser, screen]);
 
   // ── Score berekening ───────────────────────────────────────
   const berekenScore = (vakkenData: any[], antwoorden: any, nedAntw: any) => {

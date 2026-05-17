@@ -1,82 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // Assumed Data Model
-    // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId}
-    // Fields:
-    //   - naam: string (required) - User's first name
-    //   - email: string (required, email format) - User's email address
-    //
-    // Collection: users/{userId}/progression
-    // Document ID: {date} (YYYY-MM-DD)
-    // Fields:
-    //   - userId: string (required)
-    //   - score: number (required)
-    //   - date: string (required, YYYY-MM-DD)
-    //   - timestamp: timestamp (required)
-    //
-    // ===============================================================
-
-    // ===============================================================
-    // Helper Functions
-    // ===============================================================
-    
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isValidEmail(email) {
-      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
-    }
-
-    // Domain Validators
-    function isValidUser(data) {
-      return data.keys().hasAll(['naam', 'email']) && data.keys().size() <= 30 &&
-             data.naam is string && data.naam.size() > 0 && data.naam.size() < 100 &&
-             data.email is string && isValidEmail(data.email) &&
-             (!('school' in data) || data.school is string) &&
-             (!('jaar' in data) || data.jaar is string) &&
-             (!('leeftijd' in data) || data.leeftijd is string) &&
-             (!('richting' in data) || data.richting is string) &&
-             (!('vakken' in data) || data.vakken is list) &&
-             (!('gedragAntw' in data) || data.gedragAntw is map) &&
-             (!('nederlandsAntw' in data) || data.nederlandsAntw is map) &&
-             (!('score' in data) || data.score is number) &&
-             (!('xp' in data) || data.xp is number) &&
-             (!('rank' in data) || data.rank is string) &&
-             (!('focusPoints' in data) || data.focusPoints is list) &&
-             (!('badges' in data) || data.badges is list) &&
-             (!('customBadges' in data) || data.customBadges is list);
-    }
-
-    function isValidProgression(data) {
-      return data.keys().hasAll(['userId', 'score', 'date', 'timestamp']) && data.keys().size() == 4 &&
-             data.userId is string &&
-             data.score is number &&
-             data.date is string && data.date.matches("^\\d{4}-\\d{2}-\\d{2}$") &&
-             data.timestamp is timestamp;
-    }
-
-    match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
-      allow update: if isOwner(userId) && isValidUser(request.resource.data);
-      allow delete: if isOwner(userId);
-    }
-
-    match /users/{userId}/progression/{date} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidProgression(request.resource.data);
-      allow update: if isOwner(userId) && isValidProgression(request.resource.data);
-      allow delete: if isOwner(userId);
+    match /{document=**} {
+      allow read, write: if true;
     }
   }
 }

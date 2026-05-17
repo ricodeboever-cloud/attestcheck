@@ -17,49 +17,77 @@ const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY;
 if (!apiKey) {
   console.warn("GEMINI_API_KEY is not set. AI features will fail.");
 }
-const genAI = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
+const genAI = new GoogleGenAI({ 
+  apiKey: apiKey || "MISSING_KEY",
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 // Helper to call Gemini with a fallback model list and cleaner errors
 async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
-  const modelsToTry = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
+  const modelsToTry = [
+    "gemini-3-flash-preview", 
+    "gemini-3.1-flash-lite",
+    "gemini-3.1-pro-preview",
+    "gemini-flash-latest", 
+    "gemini-2.0-flash-exp"
+  ];
   let lastError: any = null;
 
   for (const modelName of modelsToTry) {
     try {
       console.log(`Trying AI model: ${modelName}...`);
       
-      const result = await genAI.models.generateContent({
+      const response = await genAI.models.generateContent({
         model: modelName,
         contents: params.contents,
         config: {
           ...params.config,
           responseSchema: params.schema,
           temperature: 0.1,
+          safetySettings: [
+            { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+            { category: "HARM_CATEGORY_CIVIC_INTEGRITY", threshold: "BLOCK_NONE" }
+          ]
         }
       });
       
-      if (!result.text) continue; 
+      if (!response.text) {
+        console.warn(`Model ${modelName} returned empty text.`);
+        continue;
+      }
       
       console.log(`Success with ${modelName}`);
-      return result.text;
+      return response.text;
     } catch (error: any) {
       lastError = error;
-      console.warn(`Model ${modelName} failed:`, error.status || error.message);
+      const status = error.status || (error.message?.includes("429") ? 429 : 500);
+      console.warn(`Model ${modelName} failed (Status: ${status}):`, error.message);
       
-      // If it's a safety error, don't retry other models
-      if (error.message?.includes("Safety")) break;
+      // If it's a safety error and we already have BLOCK_NONE, trying other models won't help much usually, 
+      // but we try anyway unless it's a very specific filter.
+      if (error.message?.includes("Safety")) {
+        console.warn("Safety filter triggered even with BLOCK_NONE.");
+      }
       
-      // Try next model...
       continue;
     }
   }
 
   // All models failed
-  let friendlyMessage = "De AI coach heeft op dit moment een klein probleem.";
+  let friendlyMessage = "De AI coach heeft een technisch probleem.";
   if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
-    friendlyMessage = "De AI coach is even overbelast. Wacht een minuutje en probeer het dan nog eens.";
+    friendlyMessage = "De AI coach is tijdelijk overbelast (limiet bereikt). Wacht een minuutje en probeer het dan nog eens.";
   } else if (lastError?.status === 401 || lastError?.status === 403 || lastError?.message?.includes("API key")) {
-    friendlyMessage = "Er is een probleem met de API-sleutel. Controleer de instellingen.";
+    friendlyMessage = "Er is een probleem met de API-sleutel in de instellingen.";
+  } else if (lastError?.message) {
+    friendlyMessage = `De AI coach kon niet antwoorden: ${lastError.message}`;
   }
 
   throw new Error(friendlyMessage);

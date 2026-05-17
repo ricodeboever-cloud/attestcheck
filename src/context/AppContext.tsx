@@ -127,6 +127,43 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -347,8 +384,11 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
     checkApiKey();
     const unsub = onAuthStateChanged(auth, async (fbUser) => {
       if (fbUser) {
+        setLoading(true);
+        const userPath = `users/${fbUser.uid}`;
         try {
-          const snap = await getDoc(doc(db, "users", fbUser.uid));
+          // Attempt to fetch from server first to bypass potential permission/cache issues
+          const snap = await getDocFromServer(doc(db, "users", fbUser.uid));
           if (snap.exists()) {
             const data = snap.data() as UserProfile;
             setCurrentUser({ uid: fbUser.uid, ...data });
@@ -364,7 +404,9 @@ Voeg ook een lijst 'focusPoints' toe met exact 3 concrete, haalbare doelen (max 
             setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
           }
         } catch (error) {
-          console.error("Error loading user profile:", error);
+          console.warn("Firestore access error, falling back to basic profile:", error);
+          // Set basic user so app stays usable
+          setCurrentUser({ uid: fbUser.uid, naam: fbUser.email?.split('@')[0] || "Gebruiker", email: fbUser.email });
         }
       } else {
         setCurrentUser(null);
