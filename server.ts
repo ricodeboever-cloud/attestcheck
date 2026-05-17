@@ -19,6 +19,41 @@ if (!apiKey) {
 }
 const genAI = new GoogleGenAI({ apiKey: apiKey || "MISSING_KEY" });
 
+// Helper to call Gemini with retries and cleaner errors
+async function callGemini(params: { contents: any[], config?: any, schema?: any }) {
+  const models = ["gemini-1.5-flash", "gemini-1.5-flash-8b", "gemini-1.5-pro"];
+  let lastError: any = null;
+
+  for (const modelName of models) {
+    try {
+      const result = await genAI.models.generateContent({
+        model: modelName,
+        contents: params.contents,
+        config: {
+          ...params.config,
+          responseSchema: params.schema,
+        }
+      });
+      return result.text;
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`Model ${modelName} failed, trying next...`, error.status || error.message);
+      // If it's a quota error (429), it might apply to all models, but we still try others just in case
+      continue;
+    }
+  }
+
+  // If we get here, all models failed
+  let friendlyMessage = "De AI coach is op dit moment niet bereikbaar.";
+  if (lastError?.status === 429 || lastError?.message?.includes("429") || lastError?.message?.includes("quota")) {
+    friendlyMessage = "De AI coach heeft zijn limiet voor vandaag bereikt of is even overbelast. Wacht een minuutje of probeer het morgen opnieuw.";
+  } else if (lastError?.status === 401 || lastError?.status === 403) {
+    friendlyMessage = "Er is een probleem met de toegang (API-sleutel). Controleer de instellingen.";
+  }
+  
+  throw new Error(friendlyMessage);
+}
+
 // API Routes
 app.post("/api/analyze-report", async (req, res) => {
   if (!apiKey) {
@@ -26,9 +61,7 @@ app.post("/api/analyze-report", async (req, res) => {
   }
   try {
     const { parts } = req.body;
-    
-    const result = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
+    const text = await callGemini({
       contents: [{ role: "user", parts }],
       config: {
         responseMimeType: "application/json",
@@ -36,18 +69,10 @@ app.post("/api/analyze-report", async (req, res) => {
       }
     });
 
-    res.json({ text: result.text });
+    res.json({ text });
   } catch (error: any) {
     console.error("OCR Error:", error);
-    let message = "De coach kon je rapport niet scannen.";
-    if (error.status === 429) {
-      message = "De AI is even overbelast. Wacht een minuutje en probeer het opnieuw.";
-    } else if (error.status === 404) {
-      message = "Het AI-model werd niet gevonden. Neem contact op met de beheerder.";
-    } else if (error.message) {
-      message += " Details: " + error.message;
-    }
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -58,9 +83,9 @@ app.post("/api/get-feedback", async (req, res) => {
   try {
     const { prompt, image, mimeType } = req.body;
     
-    const contents: any[] = [{ text: prompt }];
+    const contents: any[] = [{ role: "user", parts: [{ text: prompt }] }];
     if (image) {
-      contents.push({
+      (contents[0].parts as any[]).push({
         inlineData: {
           mimeType: mimeType || "image/jpeg",
           data: image
@@ -68,73 +93,68 @@ app.post("/api/get-feedback", async (req, res) => {
       });
     }
 
-    const result = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
-      contents: [{ role: "user", parts: contents }],
+    const text = await callGemini({
+      contents,
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
-            attests: {
-              type: Type.OBJECT,
-              properties: {
-                A: {
-                  type: Type.OBJECT,
-                  properties: {
-                    status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    consequences: { type: Type.STRING },
-                    emoji: { type: Type.STRING }
-                  },
-                  required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
+      },
+      schema: {
+        type: Type.OBJECT,
+        properties: {
+          predictedAttest: { type: Type.STRING, enum: ["A", "B", "C"] },
+          attests: {
+            type: Type.OBJECT,
+            properties: {
+              A: {
+                type: Type.OBJECT,
+                properties: {
+                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  consequences: { type: Type.STRING },
+                  emoji: { type: Type.STRING }
                 },
-                B: {
-                  type: Type.OBJECT,
-                  properties: {
-                    status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    consequences: { type: Type.STRING },
-                    emoji: { type: Type.STRING }
-                  },
-                  required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                },
-                C: {
-                  type: Type.OBJECT,
-                  properties: {
-                    status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
-                    consequences: { type: Type.STRING },
-                    emoji: { type: Type.STRING }
-                  },
-                  required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
-                }
+                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
               },
-              required: ["A", "B", "C"]
+              B: {
+                type: Type.OBJECT,
+                properties: {
+                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  consequences: { type: Type.STRING },
+                  emoji: { type: Type.STRING }
+                },
+                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
+              },
+              C: {
+                type: Type.OBJECT,
+                properties: {
+                  status: { type: Type.STRING, enum: ["behaald", "mogelijk", "gevaar"] },
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  actionPlan: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  consequences: { type: Type.STRING },
+                  emoji: { type: Type.STRING }
+                },
+                required: ["status", "title", "description", "actionPlan", "consequences", "emoji"]
+              }
             },
-            motivation: { type: Type.STRING },
-            focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
+            required: ["A", "B", "C"]
           },
-          required: ["predictedAttest", "attests", "motivation", "focusPoints"]
-        }
+          motivation: { type: Type.STRING },
+          focusPoints: { type: Type.ARRAY, items: { type: Type.STRING } }
+        },
+        required: ["predictedAttest", "attests", "motivation", "focusPoints"]
       }
     });
 
-    res.json({ text: result.text });
+    res.json({ text });
   } catch (error: any) {
     console.error("AI Feedback Error:", error);
-    let message = "Er ging iets mis bij het genereren van feedback.";
-    if (error.status === 429) {
-      message = "De AI is even overbelast. Wacht een minuutje en probeer het opnieuw.";
-    }
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -144,21 +164,16 @@ app.post("/api/chat", async (req, res) => {
   }
   try {
     const { prompt, responseMimeType } = req.body;
-    const result = await genAI.models.generateContent({
-      model: "gemini-1.5-flash",
+    const text = await callGemini({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       config: {
         responseMimeType: responseMimeType || "text/plain",
       }
     });
-    res.json({ text: result.text });
+    res.json({ text });
   } catch (error: any) {
     console.error("Chat Error:", error);
-    let message = "De coach kan even niet antwoorden.";
-    if (error.status === 429) {
-      message = "De AI is even overbelast.";
-    }
-    res.status(500).json({ error: message });
+    res.status(500).json({ error: error.message });
   }
 });
 
