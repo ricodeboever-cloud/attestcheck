@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, getDocFromServer, setDoc } from 'firebase/firestore';
+import { doc, getDocFromServer, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { CONFIG, getRankInfo, RANKS } from '../constants';
+import { CONFIG } from '../constants';
 
 declare global {
   interface Window {
@@ -34,11 +34,6 @@ export interface UserProfile {
   gedragAntw?: any;
   nederlandsAntw?: any;
   score?: number;
-  xp?: number;
-  rank?: string;
-  progression?: any[];
-  badges?: string[];
-  customBadges?: any[];
 }
 
 interface AppContextType {
@@ -64,10 +59,6 @@ interface AppContextType {
   setReportImage: (i: string | null) => void;
   reportMimeType: string | null;
   setReportMimeType: (m: string | null) => void;
-  progression: any[];
-  setProgression: (p: any[]) => void;
-  saveSuccess: boolean;
-  setSaveSuccess: (s: boolean) => void;
   hasApiKey: boolean;
   setHasApiKey: (h: boolean) => void;
   showSettings: boolean;
@@ -85,7 +76,6 @@ interface AppContextType {
   setFeedbackSuccess: (s: boolean) => void;
   submitFeedback: () => Promise<void>;
   getAttest: (s: number) => { label: string; kleur: string; emoji: string; tekst: string };
-  saveTodayScore: () => Promise<void>;
   logout: () => Promise<void>;
   checkApiKey: () => Promise<void>;
   getApiKey: () => string;
@@ -107,8 +97,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [score, setScore] = useState<number | null>(null);
   const [reportImage, setReportImage] = useState<string | null>(null);
   const [reportMimeType, setReportMimeType] = useState<string | null>(null);
-  const [progression, setProgression] = useState<any[]>([]);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [hasApiKey, setHasApiKey] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -140,28 +128,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (s >= CONFIG.attestA_drempel) return { label: "Attest A", kleur: "#22C55E", emoji: "🏆", tekst: "Gefeliciteerd! Je bent geslaagd voor dit jaar." };
     if (s >= CONFIG.attestB_drempel) return { label: "Attest B", kleur: "#F59E0B", emoji: "📋", tekst: "Je mag overgaan, maar met bepaalde beperkingen of voorwaarden." };
     return { label: "Attest C", kleur: "#EF4444", emoji: "📌", tekst: "Je slaagt momenteel niet. Je zal dit jaar moeten overdoen of van richting veranderen." };
-  };
-
-  const saveTodayScore = async () => {
-    if (!currentUser || score === null) return;
-    const today = new Date().toISOString().split('T')[0];
-    const newEntry = { date: today, score };
-    const updatedProgression = [...progression, newEntry];
-
-    try {
-      await setDoc(doc(db, "users", currentUser.uid), {
-        ...currentUser,
-        progression: updatedProgression,
-        score: score,
-        vakken: vakken,
-        gedragAntw: gedragAntw,
-        nederlandsAntw: nederlandsAntw
-      });
-      setProgression(updatedProgression);
-      setSaveSuccess(true);
-    } catch (e) {
-      console.error(e);
-    }
   };
 
   const logout = async () => {
@@ -233,8 +199,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       score, setScore,
       reportImage, setReportImage,
       reportMimeType, setReportMimeType,
-      progression, setProgression,
-      saveSuccess, setSaveSuccess,
       hasApiKey, setHasApiKey,
       showSettings, setShowSettings,
       showProfile, setShowProfile,
@@ -244,7 +208,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       feedbackLoading, feedbackSuccess, setFeedbackSuccess,
       submitFeedback,
       getAttest,
-      saveTodayScore,
       logout, checkApiKey, getApiKey,
       loading
     }}>

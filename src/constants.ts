@@ -22,18 +22,6 @@ export const CONFIG = {
   ]
 };
 
-export const RANKS = [
-  { min: 0, name: "Nieuweling 🐣", color: "#94A3B8" },
-  { min: 100, name: "Groeier 🌱", color: "#22C55E" },
-  { min: 300, name: "Strijder ⚔️", color: "#3B82F6" },
-  { min: 600, name: "Expert 🎓", color: "#8B5CF6" },
-  { min: 1000, name: "Legende 👑", color: "#F59E0B" }
-];
-
-export const getRankInfo = (xp: number) => {
-  return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
-};
-
 export const S: any = {
   page: {
     fontFamily: "'Nunito','Arial Rounded MT Bold',sans-serif",

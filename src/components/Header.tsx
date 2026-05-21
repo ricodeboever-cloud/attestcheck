@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
-import { OR, ORBG, ORPL, ORD, getRankInfo } from '../constants';
+import { OR, ORBG, ORPL, ORD } from '../constants';
 
 const Header: React.FC = () => {
   const navigate = useNavigate();
@@ -33,9 +33,6 @@ const Header: React.FC = () => {
           }}
         >
           <span>👋 {currentUser.naam}</span>
-          <span style={{ background: OR, color: "white", padding: "2px 6px", borderRadius: 8, fontSize: 10 }}>
-            {getRankInfo(currentUser.xp || 0).name.split(' ')[0]}
-          </span>
         </button>
       </div>
       <button onClick={async () => { await logout(); navigate("/"); }} style={{

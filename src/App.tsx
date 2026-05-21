@@ -103,18 +103,10 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Hulpmiddel om te voorkomen dat functies (zoals badge requirements) in Firestore worden opgeslagen
+// Hulpmiddel om te voorkomen dat metadata in de document body wordt opgeslagen
 function cleanUserForFirestore(user: any) {
   if (!user) return user;
   const { uid, ...clean } = user; // Verwijder de uid, want dat is het document ID, niet data
-  
-  if (clean.customBadges) {
-    clean.customBadges = clean.customBadges.map((b: any) => {
-      // Verwijder de requirement functie als die aanwezig is (custom badges gebruiken requirementType)
-      const { requirement, ...rest } = b;
-      return rest;
-    });
-  }
   return clean;
 }
 
@@ -189,26 +181,6 @@ const CONFIG = {
   nederlandsVragen: [
     { id: "schrijven", vraag: "Kan ik vlot Nederlandse zinnen schrijven?", emoji: "✍️" },
     { id: "spreken",   vraag: "Kan ik vlot Nederlandse zinnen spreken?",   emoji: "🗣️" },
-  ],
-  BADGES: [
-    { id: "veteran", name: "Rapport Radar Veteraan 🎖️", description: "Sla 3 verschillende scores op.", requirement: (user: any, progression: any[]) => progression.length >= 3 },
-    { id: "rising_star", name: "Stijgende Lijn 📈", description: "Heb een stijgende trend in je progressie.", requirement: (user: any, progression: any[]) => {
-      if (progression.length < 2) return false;
-      return progression[progression.length - 1].score > progression[0].score;
-    }},
-    { id: "math_wizard", name: "Wiskunde Wonder 🔢", description: "Behaal meer dan 85% op Wiskunde.", requirement: (user: any) => user.vakken?.some((v: any) => v.naam.toLowerCase().includes('wiskunde') && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
-    { id: "language_hero", name: "Talenknobbel 🗣️", description: "Behaal een topscore op een taalvak (NL, FR of ENG).", requirement: (user: any) => user.vakken?.some((v: any) => (v.naam.toLowerCase().includes('frans') || v.naam.toLowerCase().includes('engels') || v.naam.toLowerCase().includes('nederlands')) && (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.85) },
-    { id: "behavior_star", name: "Modelstudent ✨", description: "Scoor maximaal op al je gedragsvragen.", requirement: (user: any) => Object.keys(user.gedragAntw || {}).length >= 5 && Object.values(user.gedragAntw || {}).every(v => v === 5) },
-    { id: "perfectionist", name: "Perfectionist 💎", description: "Behaal een totale score van meer dan 90%.", requirement: (user: any) => (user.score || 0) >= 90 },
-    { id: "comeback_kid", name: "Comeback Kid 🔝", description: "Verbeter je score met meer dan 10% in één meting.", requirement: (user: any, progression: any[]) => {
-      if (progression.length < 2) return false;
-      return (progression[progression.length - 1].score - progression[progression.length - 2].score) >= 10;
-    }},
-    { id: "heavy_lifter", name: "Zware Lader 🏋️", description: "Behaal meer dan 75% op al je hoofdvakken.", requirement: (user: any) => {
-      const hoofdvakken = user.vakken?.filter((v: any) => v.isHoofdvak);
-      return hoofdvakken && hoofdvakken.length > 0 && hoofdvakken.every((v: any) => (parseFloat(v.punt)/parseFloat(v.maxPunt)) >= 0.75);
-    }},
-    { id: "early_bird", name: "Vroege Vogel 🐦", description: "Voer een analyse uit voor 8u 's ochtends.", requirement: () => new Date().getHours() < 8 },
   ]
 };
 
@@ -245,11 +217,7 @@ function AttestatieApp() {
     reportImage,
     setReportImage,
     hasApiKey,
-    setHasApiKey,
-    progression,
-    setProgression,
-    saveSuccess,
-    setSaveSuccess
+    setHasApiKey
   } = useApp();
 
   const [screen, setScreen] = useState("loading");
@@ -261,140 +229,6 @@ function AttestatieApp() {
   const [grades_ocrFout, setGrades_ocrFout] = useState("");
   const [grades_ocrLoading, setGrades_ocrLoading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const [progressionLoading, setProgressionLoading] = useState(false);
-
-  const fetchProgression = async () => {
-    if (!currentUser) return;
-    setProgressionLoading(true);
-    try {
-      const path = `users/${currentUser.uid}/progression`;
-      const { getDocs, query, orderBy } = await import("firebase/firestore");
-      const q = query(collection(db, path), orderBy("date", "asc"));
-      const snap = await getDocs(q);
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProgression(data);
-    } catch (error) {
-      console.error("Error fetching progression:", error);
-    } finally {
-      setProgressionLoading(false);
-    }
-  };
-
-  const saveTodayScore = async () => {
-    if (!currentUser || score === null) return;
-    const today = new Date().toISOString().split('T')[0];
-    try {
-      const path = `users/${currentUser.uid}/progression`;
-      await setDoc(doc(db, path, today), {
-        userId: currentUser.uid,
-        score: score,
-        date: today,
-        timestamp: serverTimestamp()
-      });
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
-      const { getDocs, query, orderBy } = await import("firebase/firestore");
-      const q = query(collection(db, path), orderBy("date", "asc"));
-      const snap = await getDocs(q);
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setProgression(data);
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}/progression/${today}`);
-    }
-  };
-
-  const deleteProgressionPoint = async (date: string) => {
-    if (!currentUser) return;
-    if (!window.confirm(`Weet je zeker dat je de meting van ${date} wilt verwijderen?`)) return;
-    try {
-      const { deleteDoc } = await import("firebase/firestore");
-      await deleteDoc(doc(db, `users/${currentUser.uid}/progression`, date));
-      fetchProgression();
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `users/${currentUser.uid}/progression/${date}`);
-    }
-  };
-
-  const RANKS = [
-    { min: 0,      name: "Starter 🔰", color: "#94A3B8" },
-    { min: 50,     name: "Nieuwkomer ✨", color: "#CBD5E1" },
-    { min: 100,    name: "Groeier 🌱", color: "#22C55E" },
-    { min: 150,    name: "Verkenner 🔭", color: "#4ADE80" },
-    { min: 200,    name: "Doorzetter 🏃", color: "#86EFAC" },
-    { min: 250,    name: "Ontdekker 🗺️", color: "#3B82F6" },
-    { min: 300,    name: "Strijder 💪", color: "#60A5FA" },
-    { min: 400,    name: "Klimmer 🧗", color: "#93C5FD" },
-    { min: 500,    name: "Talent 🌟", color: "#FACC15" },
-    { min: 600,    name: "Expert 🎓", color: "#A855F7" },
-    { min: 700,    name: "Specialist 🧪", color: "#C084FC" },
-    { min: 800,    name: "Gevorderde 🚀", color: "#E879F9" },
-    { min: 900,    name: "Prof 👨‍🏫", color: "#F472B6" },
-    { min: 1000,   name: "Meester 🏆", color: "#F59E0B" },
-    { min: 1500,   name: "Mentor 🧠", color: "#D946EF" },
-    { min: 2000,   name: "Elite 💎", color: "#EF4444" },
-    { min: 3000,   name: "Legende 🛡️", color: "#FB923C" },
-    { min: 5000,   name: "Kampioen 🥇", color: "#F97316" },
-    { min: 7500,   name: "Grootmeester 🏛️", color: "#EA580C" },
-    { min: 10000,  name: "Fenomeen 🎇", color: "#C026D3" },
-    { min: 15000,  name: "Titan ⚡", color: "#4F46E5" },
-    { min: 20000,  name: "Oracle 👁️", color: "#7C3AED" },
-    { min: 30000,  name: "Overlord 👑", color: "#9333EA" },
-    { min: 45000,  name: "Demi-God 🌪️", color: "#DB2777" },
-    { min: 60000,  name: "Alwetende ♾️", color: "#E11D48" },
-    { min: 80000,  name: "Universeel Genie 🌌", color: "#F43F5E" },
-    { min: 100000, name: "Oneindige Wijsheid 🏮", color: "#FF0000" },
-  ];
-
-  const getRankInfo = (xp: number) => {
-    return [...RANKS].reverse().find(r => xp >= r.min) || RANKS[0];
-  };
-
-  const addXP = async (amount: number) => {
-    if (!currentUser) return;
-    const newXP = (currentUser.xp || 0) + amount;
-    const newRank = getRankInfo(newXP).name;
-    
-    try {
-      const updatedData = cleanUserForFirestore({
-        ...currentUser,
-        xp: newXP,
-        rank: newRank
-      });
-      await setDoc(doc(db, "users", currentUser.uid), updatedData);
-      setCurrentUser({ ...currentUser, xp: newXP, rank: newRank });
-    } catch (error) {
-      console.error("Error updating XP:", error);
-    }
-  };
-
-
-  useEffect(() => {
-    if (currentUser && screen === "progression") {
-      fetchProgression();
-    }
-  }, [currentUser, screen]);
-
-  const calculatePrognosis = (data: any[]) => {
-    if (data.length < 2) return null;
-    const last = data[data.length - 1].score;
-    const first = data[0].score;
-    const diff = last - first;
-    
-    // Trend bepalen
-    let trend = "stabiel";
-    if (diff > 5) trend = "stijgend";
-    if (diff < -5) trend = "dalend";
-
-    // Prognose score
-    let prognosisScore = last;
-    if (trend === "stijgend") prognosisScore += 5;
-    if (trend === "dalend") prognosisScore -= 5;
-    if (last > 70 && trend === "stabiel") prognosisScore += 2;
-
-    prognosisScore = Math.min(100, Math.max(0, prognosisScore));
-
-    return { trend, prognosisScore };
-  };
 
   interface FocusPoint {
     id: string;
@@ -907,9 +741,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
 
   // ── 1.5 DASHBOARD (LANDING VOOR INGELOGDE GEBRUIKERS) ────────
   const DashboardScreen = () => {
-    const xp = currentUser?.xp || 0;
-    const rank = getRankInfo(xp);
-
     const startNieuweAnalyse = () => {
       setVakken([]);
       setGedragAntw({});
@@ -932,13 +763,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           
           <button style={S.btn} onClick={startNieuweAnalyse}>
             Voorspel mijn Attest <SmileyIcon size={20} style={{marginLeft:8}} />
-          </button>
-
-          <button 
-            style={{ ...S.btn, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} 
-            onClick={() => setScreen("game")}
-          >
-            Mijn Groei & Progressie 📊
           </button>
           
           <Disclaimer mini />
@@ -980,12 +804,7 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
             school: regSchool,
             jaar: regJaar,
             leeftijd: regLeeftijd,
-            richting: regRichting,
-            xp: 0,
-            rank: RANKS[0].name,
-            badges: [],
-            customBadges: [],
-            focusPoints: []
+            richting: regRichting
           });
         } catch (error) {
           console.error("Firestore primary write failed:", error);
@@ -1544,6 +1363,8 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const ResultsScreen = () => {
     const [anim, setAnim] = useState(0);
     const attest = getAttest(score||0);
+    const achievedLabel = (attest.label.includes("A") ? "A" : (attest.label.includes("B") ? "B" : "C")) as "A" | "B" | "C";
+    const [openedAttest, setOpenedAttest] = useState<"A" | "B" | "C">(achievedLabel);
 
     useEffect(()=>{
       let raf: number;
@@ -1749,6 +1570,123 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       );
     };
 
+    const getStaticFeedbackPoints = () => {
+      const points: Array<{ icon: string; title: string; text: string }> = [];
+      const scoreNum = score !== null ? score : anim;
+      
+      // 1. Overall Score & Threshold Feedback
+      if (scoreNum > 0) {
+        if (scoreNum >= CONFIG.attestA_drempel) {
+          const excess = Math.round(scoreNum - CONFIG.attestA_drempel);
+          points.push({
+            icon: "🚀",
+            title: "Uitstekende positie!",
+            text: `Je zit momenteel ${excess > 0 ? `${excess}% ` : ""}boven de drempel voor een A-Attest. Blijf deze inzet tonen om dit niveau vast te houden!`
+          });
+        } else if (scoreNum >= CONFIG.attestB_drempel) {
+          const gapToA = Math.round(CONFIG.attestA_drempel - scoreNum);
+          points.push({
+            icon: "📈",
+            title: "B-Attest zone - Je bent er bijna!",
+            text: `Je hebt nog slechts ${gapToA}% extra nodig om een A-Attest (${CONFIG.attestA_drempel}%) te bereiken. Dit is absoluut haalbaar met kleine verbeteringen!`
+          });
+        } else {
+          const gapToB = Math.round(CONFIG.attestB_drempel - scoreNum);
+          points.push({
+            icon: "🚨",
+            title: "Belangrijk actiepunt",
+            text: `Je bevindt je nu in de C-Attest zone. Je hebt nog ${gapToB}% nodig om de drempel van een B-Attest (${CONFIG.attestB_drempel}%) te halen. Laten we kijken waar we de snelste winst kunnen behalen!`
+          });
+        }
+      }
+
+      // 2. Grades Analysis (Fails & Strengths)
+      const validVakken = vakken.filter(v => v.punt !== "" && !isNaN(parseFloat(v.punt)));
+      const fails = validVakken.filter(v => {
+        const pVal = parseFloat(v.punt);
+        const maxVal = parseFloat(v.maxPunt) || 100;
+        return (pVal / maxVal) < 0.5;
+      });
+      const toppers = validVakken.filter(v => {
+        const pVal = parseFloat(v.punt);
+        const maxVal = parseFloat(v.maxPunt) || 100;
+        return (pVal / maxVal) >= 0.75;
+      });
+
+      if (toppers.length > 0) {
+        const names = toppers.map(v => v.naam).slice(0, 3).join(", ");
+        points.push({
+          icon: "⭐",
+          title: "Sterke prestatie",
+          text: `Mooi resultaat voor ${names}! Hier toon je sterke capaciteiten. Pas dezelfde focus toe op je andere vakken.`
+        });
+      }
+
+      if (fails.length > 0) {
+        const names = fails.map(v => `${v.naam} (${v.punt}/${v.maxPunt})`).slice(0, 3).join(", ");
+        const hasHoofdvakFail = fails.some(v => v.isHoofdvak);
+        points.push({
+          icon: "⚠️",
+          title: "Aandachtspunten",
+          text: `Besteed extra aandacht aan ${names}. ${hasHoofdvakFail ? "Let op: hier zitten hoofdvakken bij, die wegen extra zwaar door!" : "Gerichte inspanning voor deze vakken haalt je totale gemiddelde direct op."}`
+        });
+      }
+
+      // 3. Attitude & Behavior Feedback
+      const lowAttitudes = CONFIG.gedragsVragen.filter(q => gedragAntw[q.id] !== undefined && gedragAntw[q.id] <= 3);
+      const highAttitudes = CONFIG.gedragsVragen.filter(q => gedragAntw[q.id] !== undefined && gedragAntw[q.id] >= 4);
+
+      if (lowAttitudes.length > 0) {
+        const lowTips: Record<string, string> = {
+          stipt: "Probeer stipter te klassen binnen te stappen; op tijd komen is cruciaal voor een sterke indruk.",
+          huiswerk: "Zorg ervoor dat je alle huistaken & opdrachten steeds indient. Vraag hulp als taken te moeilijk lijken.",
+          inzet: "Toon meer proactieve participatie tijdens de lesuren. Stel op tijd vragen.",
+          respect: "Een open, respectvolle houding naar leerkrachten toe zorgt onmiddellijk voor een betere werksfeer."
+        };
+        
+        const details = lowAttitudes.map(q => lowTips[q.id] || q.vraag).join(" ");
+        points.push({
+          icon: "🤝",
+          title: "Werkpunten attitude",
+          text: details
+        });
+      } else if (highAttitudes.length === CONFIG.gedragsVragen.length) {
+        points.push({
+          icon: "✨",
+          title: "Schitterende instelling!",
+          text: "Je attitude, respectvolle houding en klas-inzet zijn voorbeeldig. Leerkrachten waarderen dit enorm!"
+        });
+      }
+
+      // 4. Dutch / Language Feedback
+      const hasWritingIssue = nederlandsAntw.schrijven === "nee";
+      const hasSpeakingIssue = nederlandsAntw.spreken === "nee";
+
+      if (hasWritingIssue || hasSpeakingIssue) {
+        let languageText = "";
+        if (hasWritingIssue && hasSpeakingIssue) {
+          languageText = "Je gaf aan moeite te hebben met schrijven en spreken in het Nederlands. Aarzel niet om ondersteuning of hulp te vragen bij je leerkrachten.";
+        } else if (hasWritingIssue) {
+          languageText = "Het schrijven in het Nederlands kan nog extra aandacht gebruiken. Oefen met korte schrijfopdrachten.";
+        } else {
+          languageText = "Je vindt vlot spreken in de klas nog spannend. Geen zorgen! Probeer eerst in kleine groepjes meer deel te nemen.";
+        }
+        points.push({
+          icon: "🇳🇱",
+          title: "Taalontwikkeling",
+          text: languageText
+        });
+      } else if (nederlandsAntw.schrijven === "ja" && nederlandsAntw.spreken === "ja") {
+        points.push({
+          icon: "🗣️",
+          title: "Taalbeheersing ok",
+          text: "Fijn dat Nederlands vlot verloopt! Dit geeft je een nuttige bonus van +3% op je eindberekening."
+        });
+      }
+
+      return points;
+    };
+
     return (
       <div>
         <StapBar huidig="results"/>
@@ -1760,24 +1698,245 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           <Speedo val={anim}/>
           <CharacterAnimation val={anim}/>
 
-          <div style={{textAlign:"center",background:`${attest.kleur}14`,border:`2px solid ${attest.kleur}44`,
-            borderRadius:16,padding:"16px 20px",marginBottom:16}}>
-            <div style={{fontSize:22,fontWeight:900,color:attest.kleur,marginBottom:8}}>{attest.emoji} {attest.label}</div>
-            <p style={{fontSize:14,color:"#5D3D1A",margin:0,lineHeight:1.6}}>{attest.tekst}</p>
-          </div>
-
-          <div style={{ display: "flex", gap: 10, marginBottom: 12 }}>
-            <button style={{ ...S.btn, flex: 1, background: `linear-gradient(135deg, #6366F1, #8B5CF6)`, boxShadow: "0 8px 24px rgba(99, 102, 241, 0.3)" }} onClick={() => setScreen("game")}>🎮 Mijn Spel</button>
-            <button 
-              style={{ ...S.btn, flex: 1, background: saveSuccess ? "#22C55E" : OR }} 
-              onClick={saveTodayScore}
-              disabled={saveSuccess}
+          {/* THREE ATTESTS ACCORDION */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 20 }}>
+            <h3 style={{ fontSize: 16, fontWeight: 900, color: "#2D1B00", textAlign: "left", marginBottom: 4, display: "flex", alignItems: "center", gap: 8 }}>
+              <span>🔮</span> Hoe beïnvloed je jouw attest?
+            </h3>
+            
+            {/* ATTEST A CARD */}
+            <motion.div
+              layout
+              onClick={() => setOpenedAttest("A")}
+              style={{
+                cursor: "pointer",
+                background: openedAttest === "A" ? "#F0FDF4" : "#F8FAFC",
+                border: `2px solid ${openedAttest === "A" ? "#22C55E" : achievedLabel === "A" ? "#22C55E55" : "#E2E8F0"}`,
+                borderRadius: 20,
+                padding: "16px 20px",
+                textAlign: "left",
+                transition: "background 0.2s, border 0.2s",
+                boxShadow: achievedLabel === "A" ? "0 4px 12px rgba(34, 197, 94, 0.08)" : "none",
+                position: "relative"
+              }}
             >
-              {saveSuccess ? "✅ Opgeslagen!" : "💾 Sla score op"}
-            </button>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>🏆</span>
+                  <div>
+                    <span style={{ fontSize: 16, fontWeight: 900, color: "#166534" }}>Attest A</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#15803D", background: "#DCFCE7", padding: "2px 8px", borderRadius: 100, marginLeft: 8 }}>
+                      Alles oké - overgaan!
+                    </span>
+                  </div>
+                </div>
+                {achievedLabel === "A" ? (
+                  <span style={{ fontSize: 10, fontWeight: 900, color: "white", background: "#22C55E", padding: "4px 8px", borderRadius: 8, letterSpacing: 0.5 }}>
+                    JOUW STATUS ✅
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#64748B", background: "#F1F5F9", padding: "3px 8px", borderRadius: 6 }}>
+                    {openedAttest === "A" ? "Geopend 👇" : "Klik voor info 🔍"}
+                  </span>
+                )}
+              </div>
+
+              {openedAttest === "A" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  style={{ marginTop: 16, borderTop: "1px solid #DCFCE7", paddingTop: 14 }}
+                >
+                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #22C55E3D", marginBottom: 12 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#14532D", fontStyle: "italic", lineHeight: 1.5 }}>
+                      💬 <strong>Van leerling tot leerling:</strong> "Gefeliciteerd! Je hebt je jaar binnen. Maar blijf bij de les: zelfs met een goed gemiddelde kan een zware onvoldoende op een hoofdvak of een lakse instelling je A-attest om zeep helpen. Blijf dus gewoon consistent je taken indienen en kom overal op tijd."
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
+                    <div style={{ fontSize: 12, color: "#15803D" }}>
+                      🎯 <strong>Wat heb je nodig?</strong> Een gemiddelde score van minstens <strong>{CONFIG.attestA_drempel}%</strong> en geen zware rode cijfers op je hoofdvakken.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#15803D" }}>
+                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> Stoppen met huistaken maken en deadlines missen. "Niet ingediend" is de snelste weg naar leerkrachten die je liever geen A gunnen op de klassenraad!
+                    </div>
+                    <div style={{ fontSize: 12, color: "#15803D", fontWeight: 800, marginTop: 4 }}>
+                      🔑 <strong>Echte takeaway:</strong> Consistentie is key. Verlies geen domme punten op taken en toon dat je erbij wil horen.
+                    </div>
+                  </div>
+
+                  {achievedLabel === "A" && (
+                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #BBF7D0" }}>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: "#166534", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {getStaticFeedbackPoints().map((pt, i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#14532D", lineHeight: 1.4 }}>
+                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
+
+            {/* ATTEST B CARD */}
+            <motion.div
+              layout
+              onClick={() => setOpenedAttest("B")}
+              style={{
+                cursor: "pointer",
+                background: openedAttest === "B" ? "#FFFBEB" : "#F8FAFC",
+                border: `2px solid ${openedAttest === "B" ? "#F59E0B" : achievedLabel === "B" ? "#F59E0B55" : "#E2E8F0"}`,
+                borderRadius: 20,
+                padding: "16px 20px",
+                textAlign: "left",
+                transition: "background 0.2s, border 0.2s",
+                boxShadow: achievedLabel === "B" ? "0 4px 12px rgba(245, 158, 11, 0.08)" : "none",
+                position: "relative"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>📋</span>
+                  <div>
+                    <span style={{ fontSize: 16, fontWeight: 900, color: "#92400E" }}>Attest B</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#B45309", background: "#FEF3C7", padding: "2px 8px", borderRadius: 100, marginLeft: 8 }}>
+                      Overgaan met beperkingen
+                    </span>
+                  </div>
+                </div>
+                {achievedLabel === "B" ? (
+                  <span style={{ fontSize: 10, fontWeight: 900, color: "white", background: "#F59E0B", padding: "4px 8px", borderRadius: 8, letterSpacing: 0.5 }}>
+                    JOUW STATUS ✅
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#64748B", background: "#F1F5F9", padding: "3px 8px", borderRadius: 6 }}>
+                    {openedAttest === "B" ? "Geopend 👇" : "Klik voor info 🔍"}
+                  </span>
+                )}
+              </div>
+
+              {openedAttest === "B" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  style={{ marginTop: 16, borderTop: "1px solid #FEF3C7", paddingTop: 14 }}
+                >
+                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #F59E0B3D", marginBottom: 12 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#78350F", fontStyle: "italic", lineHeight: 1.5 }}>
+                      💬 <strong>Van leerling tot leerling:</strong> "Dit is geen ramp, maar wel een serieuze waarschuwing! Je mag door naar volgend jaar, maar bepaalde richtingen blijven gesloten voor jou. Wil je toch naar een A-attest stijgen? Focus direct op die paar mindere vakken en verhoog je attitude. De lerarenraad beslist hierover, dus laat zien dat je écht gemotiveerd bent!"
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
+                    <div style={{ fontSize: 12, color: "#B45309" }}>
+                      📈 <strong>Hoe geraak je er?</strong> Jouw score ligt tussen <strong>{CONFIG.attestB_drempel}%</strong> en <strong>{CONFIG.attestA_drempel}%</strong>, of je hebt een of twee zware onvoldoendes op kernvakken.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#B45309" }}>
+                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> Je leerkrachten tegenwerken of doen alsof er niks aan de hand is. Zij bepalen je uitsluitingen, dus een fijne sfeer bewaren is letterlijk jouw goud waard!
+                    </div>
+                    <div style={{ fontSize: 12, color: "#B45309", fontWeight: 800, marginTop: 4 }}>
+                      🔑 <strong>Echte takeaway:</strong> Werk keihard aan die specifieke struikelvakken en ga een keertje praten met de vakleerkracht voor tips.
+                    </div>
+                  </div>
+
+                  {achievedLabel === "B" && (
+                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #FDE68A" }}>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: "#92400E", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {getStaticFeedbackPoints().map((pt, i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#78350F", lineHeight: 1.4 }}>
+                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
+
+            {/* ATTEST C CARD */}
+            <motion.div
+              layout
+              onClick={() => setOpenedAttest("C")}
+              style={{
+                cursor: "pointer",
+                background: openedAttest === "C" ? "#FEF2F2" : "#F8FAFC",
+                border: `2px solid ${openedAttest === "C" ? "#EF4444" : achievedLabel === "C" ? "#EF444455" : "#E2E8F0"}`,
+                borderRadius: 20,
+                padding: "16px 20px",
+                textAlign: "left",
+                transition: "background 0.2s, border 0.2s",
+                boxShadow: achievedLabel === "C" ? "0 4px 12px rgba(239, 68, 68, 0.08)" : "none",
+                position: "relative"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span style={{ fontSize: 24 }}>📌</span>
+                  <div>
+                    <span style={{ fontSize: 16, fontWeight: 900, color: "#991B1B" }}>Attest C</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: "#B91C1C", background: "#FEE2E2", padding: "2px 8px", borderRadius: 100, marginLeft: 8 }}>
+                      Jaar overdoen / niet geslaagd
+                    </span>
+                  </div>
+                </div>
+                {achievedLabel === "C" ? (
+                  <span style={{ fontSize: 10, fontWeight: 900, color: "white", background: "#EF4444", padding: "4px 8px", borderRadius: 8, letterSpacing: 0.5 }}>
+                    JOUW STATUS ✅
+                  </span>
+                ) : (
+                  <span style={{ fontSize: 11, fontWeight: 800, color: "#64748B", background: "#F1F5F9", padding: "3px 8px", borderRadius: 6 }}>
+                    {openedAttest === "C" ? "Geopend 👇" : "Klik voor info 🔍"}
+                  </span>
+                )}
+              </div>
+
+              {openedAttest === "C" && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  style={{ marginTop: 16, borderTop: "1px solid #FEE2E2", paddingTop: 14 }}
+                >
+                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #EF44443D", marginBottom: 12 }}>
+                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#7F1D1D", fontStyle: "italic", lineHeight: 1.5 }}>
+                      💬 <strong>Van leerling tot leerling:</strong> "Oké, dit voelt echt even superkut, maar laat je kop niet hangen! Een C-attest betekent dat je gemiddelde te laag is of dat je een grote opstapeling van rode cijfers hebt liggen. Dat kun je keihard voorkomen: lever NU je openstaande taken in, doe actief mee en maak je houding subliem. Een ijzersterke inzet is jouw ultieme reddingsboei!"
+                    </p>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
+                    <div style={{ fontSize: 12, color: "#B91C1C" }}>
+                      🚨 <strong>Waarom gebeurt dit?</strong> Je totale score valt onder de drempel van <strong>{CONFIG.attestB_drempel}%</strong>, of je hebt te veel onvoldoendes op cruciale vakken.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#B91C1C" }}>
+                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> In stilte ontkennen en opgeven. Als je het niet snapt, roep hulp in! En stop met dwarsliggen; leerkrachten helpen liever een leerling die wil verbeteren.
+                    </div>
+                    <div style={{ fontSize: 12, color: "#B91C1C", fontWeight: 800, marginTop: 4 }}>
+                      🔑 <strong>Echte takeaway:</strong> C-attesten vermijd je door onmiddellijk hulp te vragen en de klassenraad te overtuigen met een goudsmidse instelling.
+                    </div>
+                  </div>
+
+                  {achievedLabel === "C" && (
+                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #FCA5A5" }}>
+                      <div style={{ fontSize: 11, fontWeight: 900, color: "#991B1B", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {getStaticFeedbackPoints().map((pt, i) => (
+                          <div key={i} style={{ fontSize: 11, color: "#7F1D1D", lineHeight: 1.4 }}>
+                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </motion.div>
           </div>
 
-          <button style={S.btnSec} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
+          <button style={{ ...S.btn, marginBottom: 12 }} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
           <Disclaimer />
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10, marginTop:10}}>
             <button style={S.btnSec} onClick={()=>setScreen("grades")}>
@@ -1875,303 +2034,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
     );
   };
 
-  // ── 13. GAME SCREEN (GAMIFICATION HUB) ─────────────────────
-  const GameScreen = () => {
-    const xp = currentUser?.xp || 0;
-    const rank = getRankInfo(xp);
-    const nextRank = RANKS.find(r => r.min > xp);
-    const progress = nextRank ? ((xp - rank.min) / (nextRank.min - rank.min)) * 100 : 100;
-    const prognosis = calculatePrognosis(progression);
-    const today = new Date().toISOString().split('T')[0];
-    const alreadySaved = progression.some(p => p.date === today);
-
-    return (
-      <div style={{ paddingBottom: 40 }}>
-        <button style={S.back} onClick={() => setScreen("dashboard")}>← Terug naar Dashboard</button>
-        
-        <div style={{textAlign:"center", marginBottom:24}}>
-          <div style={{fontSize:52, marginBottom:8}}>🎮</div>
-          <h2 style={S.h2}>Mijn Spel & Progressie</h2>
-          <p style={S.sub}>Hier vind je alles over je groei en beloningen.</p>
-        </div>
-
-        {/* XP & Rank Card */}
-        <div style={{...S.card, padding: 24, marginBottom: 20, background: `linear-gradient(135deg, white, ${ORBG})`, border: `2px solid ${ORPL}`}}>
-          <div style={{ display: "flex", alignItems: "center", gap: 20, marginBottom: 20 }}>
-            <div style={{ fontSize: 60, filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.1))" }}>{rank.name.split(' ')[1]}</div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 12, fontWeight: 800, color: "#8B6242", textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>Huidige Status</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: rank.color }}>{rank.name}</div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: 28, fontWeight: 900, color: OR }}>{xp}</div>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#8B6242" }}>TOTAAL XP</div>
-            </div>
-          </div>
-
-          <div style={{ background: "white", borderRadius: 20, padding: 16, border: "1px solid rgba(0,0,0,0.05)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13, fontWeight: 800 }}>
-              <span style={{color: "#64748B"}}>Voortgang naar volgende rang</span>
-              <span style={{color: OR}}>{Math.round(progress)}%</span>
-            </div>
-            <div style={{ width: "100%", height: 14, background: "#F1F5F9", borderRadius: 10, overflow: "hidden", border: "1px solid #E2E8F0" }}>
-              <motion.div 
-                initial={{ width: 0 }}
-                animate={{ width: `${progress}%` }}
-                transition={{ duration: 1, ease: "easeOut" }}
-                style={{ height: "100%", background: `linear-gradient(90deg, ${OR}, ${ORL})` }}
-              />
-            </div>
-            {nextRank && (
-              <p style={{ fontSize: 12, color: "#8B6242", marginTop: 10, fontWeight: 700, textAlign: "center" }}>
-                Nog <span style={{color: OR}}>{nextRank.min - xp} XP</span> tot <span style={{color: nextRank.color}}>{nextRank.name}</span>
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Badges Section */}
-        <div style={{...S.card, padding: 24, marginBottom: 20}}>
-          <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
-            <span style={{fontSize: 24}}>🏅</span> Mijn Badges
-          </h3>
-          <p style={{...S.sub, marginBottom: 20}}>Verzamel badges door doelen te bereiken en je rapport te verbeteren!</p>
-          
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            {[...CONFIG.BADGES, ...(currentUser?.customBadges || [])].map((badge: any) => {
-              const isEarned = currentUser?.badges?.includes(badge.id);
-              
-              const shareBadge = () => {
-                if (!isEarned) return;
-                const text = `🏆 Ik heb de badge "${badge.name}" behaald op RapportRadar! 📊\n\n${badge.description}\n\nCheck je eigen rapport op RapportRadar! 🚀`;
-                navigator.clipboard.writeText(text);
-                alert("Badge info gekopieerd naar klembord! Je kunt het nu delen op sociale media. 🚀");
-              };
-
-              return (
-                <motion.div
-                  key={badge.id}
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  onClick={shareBadge}
-                  style={{
-                    background: "white",
-                    borderRadius: 24,
-                    padding: 0,
-                    border: `2px solid ${isEarned ? OR : "#F1F5F9"}`,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    textAlign: "center",
-                    opacity: isEarned ? 1 : 0.5,
-                    filter: isEarned ? "none" : "grayscale(80%)",
-                    position: "relative",
-                    overflow: "hidden",
-                    cursor: isEarned ? "pointer" : "default",
-                    boxShadow: isEarned ? `0 8px 20px ${OR}22` : "none"
-                  }}
-                >
-                  {/* Strava-like "Challenge" Header */}
-                  <div style={{ 
-                    width: "100%", 
-                    background: isEarned ? OR : "#F1F5F9", 
-                    padding: "4px 0",
-                    fontSize: 9,
-                    fontWeight: 900,
-                    color: isEarned ? "white" : "#94A3B8",
-                    textTransform: "uppercase",
-                    letterSpacing: 1.5
-                  }}>
-                    {isEarned ? "Challenge Voltooid" : "Badge Challenge"}
-                  </div>
-
-                  <div style={{ padding: "20px 12px 16px" }}>
-                    <div style={{ 
-                      fontSize: 56, marginBottom: 12, 
-                      filter: isEarned ? "drop-shadow(0 4px 12px rgba(244, 121, 32, 0.4))" : "none",
-                      transform: isEarned ? "scale(1.1)" : "scale(1)",
-                      transition: "transform 0.3s ease"
-                    }}>
-                      {badge.name.split(' ').pop()}
-                    </div>
-                    
-                    <div style={{ 
-                      fontSize: 15, fontWeight: 900, color: "#2D1B00", marginBottom: 6,
-                      lineHeight: 1.2
-                    }}>
-                      {badge.name.split(' ').slice(0, -1).join(' ')}
-                    </div>
-                    
-                    <div style={{ fontSize: 11, color: "#8B6242", fontWeight: 700, lineHeight: 1.4, minHeight: 32 }}>
-                      {badge.description}
-                    </div>
-                  </div>
-
-                  {/* Status Bar */}
-                  <div style={{
-                    width: "100%",
-                    padding: "10px",
-                    background: isEarned ? "#F0FDF4" : "#F8FAFC",
-                    borderTop: `1px solid ${isEarned ? "#DCFCE7" : "#F1F5F9"}`,
-                    fontSize: 10,
-                    fontWeight: 800,
-                    color: isEarned ? "#166534" : "#64748B",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4
-                  }}>
-                    {isEarned ? (
-                      <><span>✅</span> BEHAALD</>
-                    ) : (
-                      <><span>🔒</span> NOG TE BEHALEN</>
-                    )}
-                  </div>
-                  
-                  {isEarned && (
-                    <div style={{
-                      position: "absolute", top: 32, right: 12,
-                      fontSize: 10, color: OR, fontWeight: 900,
-                      opacity: 0.6
-                    }}>
-                      SHARE ↗
-                    </div>
-                  )}
-                </motion.div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Progressie Grafiek */}
-        <div style={S.card}>
-          <h3 style={{...S.h2, fontSize: 20, marginBottom: 16, display: "flex", alignItems: "center", gap: 10}}>
-            <span style={{fontSize: 24}}>📈</span> Mijn Progressie
-          </h3>
-          <div style={{ 
-            background: "white", 
-            borderRadius: 20, 
-            padding: "20px 10px", 
-            border: `2px solid ${ORPL}`,
-            marginBottom: 24,
-            height: 300
-          }}>
-            {progression.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={progression}>
-                  <defs>
-                    <linearGradient id="colorScore" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor={OR} stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor={OR} stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E5E7EB" />
-                  <XAxis 
-                    dataKey="date" 
-                    tick={{ fontSize: 10, fontWeight: 700, fill: "#8B6242" }}
-                    axisLine={false}
-                    tickLine={false}
-                    tickFormatter={(str) => str.split('-').slice(1).reverse().join('/')}
-                  />
-                  <YAxis 
-                    domain={[0, 100]} 
-                    tick={{ fontSize: 10, fontWeight: 700, fill: "#8B6242" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.1)", fontWeight: 800 }}
-                    itemStyle={{ color: OR }}
-                  />
-                  <ReferenceLine y={70} stroke="#22C55E" strokeDasharray="3 3" label={{ position: 'right', value: 'A-Attest', fill: '#22C55E', fontSize: 10, fontWeight: 800 }} />
-                  <ReferenceLine y={50} stroke="#F59E0B" strokeDasharray="3 3" label={{ position: 'right', value: 'B-Attest', fill: '#F59E0B', fontSize: 10, fontWeight: 800 }} />
-                  <Area 
-                    type="monotone" 
-                    dataKey="score" 
-                    stroke={OR} 
-                    strokeWidth={4}
-                    fillOpacity={1} 
-                    fill="url(#colorScore)" 
-                    animationDuration={1500}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            ) : (
-              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "#8B6242", fontWeight: 700, textAlign: "center", padding: 20 }}>
-                Nog geen gegevens beschikbaar.<br/>Sla je score op om je grafiek te starten!
-              </div>
-            )}
-          </div>
-
-          {prognosis && (
-            <div style={{ 
-              background: prognosis.trend === "stijgend" ? "#F0FDF4" : (prognosis.trend === "dalend" ? "#FEF2F2" : "#FFFBEB"),
-              border: `2px solid ${prognosis.trend === "stijgend" ? "#DCFCE7" : (prognosis.trend === "dalend" ? "#FEE2E2" : "#FEF3C7")}`,
-              borderRadius: 20,
-              padding: 20,
-              marginBottom: 24
-            }}>
-              <h4 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 12, display: "flex", alignItems: "center", gap: 8 }}>
-                <span>🔮</span> Prognose
-              </h4>
-              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-                <div style={{ 
-                  width: 64, height: 64, borderRadius: 100, 
-                  background: "white", display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 24, fontWeight: 900, color: OR, border: `3px solid ${ORPL}`
-                }}>
-                  {Math.round(prognosis.prognosisScore)}%
-                </div>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 800, fontSize: 14, color: "#2D1B00" }}>
-                    Trend: <span style={{ color: prognosis.trend === "stijgend" ? "#16A34A" : (prognosis.trend === "dalend" ? "#DC2626" : "#D97706") }}>
-                      {prognosis.trend.toUpperCase()} {prognosis.trend === "stijgend" ? "📈" : (prognosis.trend === "dalend" ? "📉" : "➡️")}
-                    </span>
-                  </p>
-                  <p style={{ margin: "4px 0 0", fontSize: 12, color: "#8B6242", lineHeight: 1.4 }}>
-                    {prognosis.trend === "stijgend" && "Je bent goed bezig! Als je deze lijn doortrekt, ziet je attestering er rooskleurig uit."}
-                    {prognosis.trend === "dalend" && "Let op! Je score daalt. Probeer extra inzet te tonen."}
-                    {prognosis.trend === "stabiel" && "Je behoudt een stabiel niveau. Ga zo door!"}
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div style={{ background: ORBG, borderRadius: 20, padding: 20 }}>
-            <h4 style={{ fontWeight: 900, color: "#2D1B00", fontSize: 16, marginBottom: 16 }}>📅 Historiek</h4>
-            {progression.length > 0 ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {[...progression].reverse().slice(0, 5).map(p => (
-                  <div key={p.id} style={{ 
-                    background: "white", borderRadius: 12, padding: "12px 16px", 
-                    display: "flex", justifyContent: "space-between", alignItems: "center",
-                    boxShadow: "0 2px 4px rgba(0,0,0,0.05)"
-                  }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 800, color: "#2D1B00" }}>{p.date.split('-').reverse().join('/')}</div>
-                      <div style={{ fontSize: 11, color: "#8B6242", fontWeight: 700 }}>Score: {p.score}%</div>
-                    </div>
-                    <div style={{ fontSize: 18, fontWeight: 900, color: p.score >= 70 ? "#22C55E" : (p.score >= 50 ? "#F59E0B" : "#EF4444") }}>
-                      {p.score}%
-                    </div>
-                  </div>
-                ))}
-                {progression.length > 5 && (
-                  <p style={{textAlign:"center", fontSize:12, color:OR, fontWeight:800, marginTop:10}}>
-                    En nog {progression.length - 5} andere metingen...
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p style={{ textAlign: "center", fontSize: 13, color: "#8B6242", fontStyle: "italic" }}>Geen historiek gevonden.</p>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
   // ════════════════════════════════════════════════════════════
   // RENDER
   // ════════════════════════════════════════════════════════════
@@ -2225,9 +2087,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                 }}
               >
                 <span>👋 {currentUser.naam}</span>
-                <span style={{ background: OR, color: "white", padding: "2px 6px", borderRadius: 8, fontSize: 10 }}>
-                  {getRankInfo(currentUser.xp || 0).name.split(' ')[0]}
-                </span>
               </button>
               <button onClick={handleLogout} style={{
                 background:"none",border:`1.5px solid #E5E7EB`,borderRadius:10,
@@ -2246,7 +2105,6 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
         {screen==="behavior"           && <BehaviorScreen/>}
         {screen==="results"            && <ResultsScreen/>}
         {screen==="breakdown"          && <BreakdownScreen/>}
-        {screen==="game"               && <GameScreen/>}
       </div>
 
       <FeedbackModal />
