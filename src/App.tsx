@@ -1363,8 +1363,12 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
   const ResultsScreen = () => {
     const [anim, setAnim] = useState(0);
     const attest = getAttest(score||0);
-    const achievedLabel = (attest.label.includes("A") ? "A" : (attest.label.includes("B") ? "B" : "C")) as "A" | "B" | "C";
+    const achievedLabel = (attest.label === "Attest A" ? "A" : (attest.label === "Attest B" ? "B" : "C")) as "A" | "B" | "C";
     const [openedAttest, setOpenedAttest] = useState<"A" | "B" | "C">(achievedLabel);
+
+    useEffect(() => {
+      setOpenedAttest(achievedLabel);
+    }, [achievedLabel]);
 
     useEffect(()=>{
       let raf: number;
@@ -1580,22 +1584,22 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
           const excess = Math.round(scoreNum - CONFIG.attestA_drempel);
           points.push({
             icon: "🚀",
-            title: "Uitstekende positie!",
-            text: `Je zit momenteel ${excess > 0 ? `${excess}% ` : ""}boven de drempel voor een A-Attest. Blijf deze inzet tonen om dit niveau vast te houden!`
+            title: "Super op koers!",
+            text: `Je zit ${excess > 0 ? `${excess}% ` : ""}boven de A-drempel (${CONFIG.attestA_drempel}%). Blijf knallen!`
           });
         } else if (scoreNum >= CONFIG.attestB_drempel) {
           const gapToA = Math.round(CONFIG.attestA_drempel - scoreNum);
           points.push({
             icon: "📈",
-            title: "B-Attest zone - Je bent er bijna!",
-            text: `Je hebt nog slechts ${gapToA}% extra nodig om een A-Attest (${CONFIG.attestA_drempel}%) te bereiken. Dit is absoluut haalbaar met kleine verbeteringen!`
+            title: "Sprint naar A!",
+            text: `Nog maar ${gapToA}% extra nodig voor een A-Attest. Dat haal je zo met een kleine eindsprint!`
           });
         } else {
           const gapToB = Math.round(CONFIG.attestB_drempel - scoreNum);
           points.push({
-            icon: "🚨",
-            title: "Belangrijk actiepunt",
-            text: `Je bevindt je nu in de C-Attest zone. Je hebt nog ${gapToB}% nodig om de drempel van een B-Attest (${CONFIG.attestB_drempel}%) te halen. Laten we kijken waar we de snelste winst kunnen behalen!`
+            icon: "🔥",
+            title: "Herpakken & vlammen!",
+            text: `Nog ${gapToB}% extra en je heft de drempel van herhaling op voor een B-Attest (${CONFIG.attestB_drempel}%). Elk punt telt!`
           });
         }
       }
@@ -1614,73 +1618,46 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
       });
 
       if (toppers.length > 0) {
-        const names = toppers.map(v => v.naam).slice(0, 3).join(", ");
+        const firstTopper = toppers[0];
         points.push({
           icon: "⭐",
-          title: "Sterke prestatie",
-          text: `Mooi resultaat voor ${names}! Hier toon je sterke capaciteiten. Pas dezelfde focus toe op je andere vakken.`
+          title: "Blikvanger!",
+          text: `Je blinkt echt uit in ${firstTopper.naam}! Neem diezelfde motivatie mee naar de rest.`
         });
       }
 
       if (fails.length > 0) {
-        const names = fails.map(v => `${v.naam} (${v.punt}/${v.maxPunt})`).slice(0, 3).join(", ");
+        const names = fails.map(v => v.naam).slice(0, 2).join(" & ");
         const hasHoofdvakFail = fails.some(v => v.isHoofdvak);
         points.push({
           icon: "⚠️",
-          title: "Aandachtspunten",
-          text: `Besteed extra aandacht aan ${names}. ${hasHoofdvakFail ? "Let op: hier zitten hoofdvakken bij, die wegen extra zwaar door!" : "Gerichte inspanning voor deze vakken haalt je totale gemiddelde direct op."}`
+          title: "Snelste winst:",
+          text: `Geef ${names} wat extra liefde. ${hasHoofdvakFail ? "Dit zijn hoofdvakken, die wegen zwaar door!" : "Even focussen op deze en je gemiddelde vliegt omhoog."}`
         });
       }
 
       // 3. Attitude & Behavior Feedback
       const lowAttitudes = CONFIG.gedragsVragen.filter(q => gedragAntw[q.id] !== undefined && gedragAntw[q.id] <= 3);
-      const highAttitudes = CONFIG.gedragsVragen.filter(q => gedragAntw[q.id] !== undefined && gedragAntw[q.id] >= 4);
-
       if (lowAttitudes.length > 0) {
-        const lowTips: Record<string, string> = {
-          stipt: "Probeer stipter te klassen binnen te stappen; op tijd komen is cruciaal voor een sterke indruk.",
-          huiswerk: "Zorg ervoor dat je alle huistaken & opdrachten steeds indient. Vraag hulp als taken te moeilijk lijken.",
-          inzet: "Toon meer proactieve participatie tijdens de lesuren. Stel op tijd vragen.",
-          respect: "Een open, respectvolle houding naar leerkrachten toe zorgt onmiddellijk voor een betere werksfeer."
+        const firstLow = lowAttitudes[0];
+        const lowTips: Record<number, string> = {
+          1: "Probeer stipter de les in te stappen. Op tijd komen is écht de makkelijkste goodwill ever! ⏰",
+          2: "Vergeet geen huistaken meer in te dienen. Leerkrachten haten 'niet ingediend' op de klassenraad! 📚",
+          3: "Toon inzet en doe lekker actief mee in de klas. Positieve vibes smeren de raderen! 😊",
+          4: "Sta open voor feedback en ga constructief met kritiek om. Dat toont echte volwassenheid. 🤝",
+          5: "Zorg dat je zo vaak mogelijk op school bent. Minder afwezigheid = minder inhaalstress! 🏫",
+          6: "Oortjes uit en focus op de leerkracht. Dat scheelt letterlijk de helft van je studiewerk thuis! 👂"
         };
-        
-        const details = lowAttitudes.map(q => lowTips[q.id] || q.vraag).join(" ");
         points.push({
           icon: "🤝",
-          title: "Werkpunten attitude",
-          text: details
+          title: "Super-tip attitude:",
+          text: lowTips[firstLow.id] || "Toon dat je wilt leren en meewerkt, leerkrachten onthouden dat!"
         });
-      } else if (highAttitudes.length === CONFIG.gedragsVragen.length) {
+      } else if (CONFIG.gedragsVragen.length > 0) {
         points.push({
           icon: "✨",
-          title: "Schitterende instelling!",
-          text: "Je attitude, respectvolle houding en klas-inzet zijn voorbeeldig. Leerkrachten waarderen dit enorm!"
-        });
-      }
-
-      // 4. Dutch / Language Feedback
-      const hasWritingIssue = nederlandsAntw.schrijven === "nee";
-      const hasSpeakingIssue = nederlandsAntw.spreken === "nee";
-
-      if (hasWritingIssue || hasSpeakingIssue) {
-        let languageText = "";
-        if (hasWritingIssue && hasSpeakingIssue) {
-          languageText = "Je gaf aan moeite te hebben met schrijven en spreken in het Nederlands. Aarzel niet om ondersteuning of hulp te vragen bij je leerkrachten.";
-        } else if (hasWritingIssue) {
-          languageText = "Het schrijven in het Nederlands kan nog extra aandacht gebruiken. Oefen met korte schrijfopdrachten.";
-        } else {
-          languageText = "Je vindt vlot spreken in de klas nog spannend. Geen zorgen! Probeer eerst in kleine groepjes meer deel te nemen.";
-        }
-        points.push({
-          icon: "🇳🇱",
-          title: "Taalontwikkeling",
-          text: languageText
-        });
-      } else if (nederlandsAntw.schrijven === "ja" && nederlandsAntw.spreken === "ja") {
-        points.push({
-          icon: "🗣️",
-          title: "Taalbeheersing ok",
-          text: "Fijn dat Nederlands vlot verloopt! Dit geeft je een nuttige bonus van +3% op je eindberekening."
+          title: "Goud waard!",
+          text: "Je attitude en inzet in de klas zijn voorbeeldig. Jouw leerkrachten dragen je op handen!"
         });
       }
 
@@ -1747,36 +1724,27 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                   animate={{ opacity: 1, height: "auto" }}
                   style={{ marginTop: 16, borderTop: "1px solid #DCFCE7", paddingTop: 14 }}
                 >
-                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #22C55E3D", marginBottom: 12 }}>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#14532D", fontStyle: "italic", lineHeight: 1.5 }}>
-                      💬 <strong>Van leerling tot leerling:</strong> "Gefeliciteerd! Je hebt je jaar binnen. Maar blijf bij de les: zelfs met een goed gemiddelde kan een zware onvoldoende op een hoofdvak of een lakse instelling je A-attest om zeep helpen. Blijf dus gewoon consistent je taken indienen en kom overal op tijd."
-                    </p>
-                  </div>
+                  {achievedLabel === "A" && (
+                    <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #22C55E3D", marginBottom: 12 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#14532D", fontStyle: "italic", lineHeight: 1.5 }}>
+                        💬 <strong>Van leerling tot leerling:</strong> "Lekker bezig, je jaar is zo goed als binnen! 🥳 Blijf wel gewoon je taken indienen en kom op tijd om die voorsprong niet kwijt te spelen."
+                      </p>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
                     <div style={{ fontSize: 12, color: "#15803D" }}>
-                      🎯 <strong>Wat heb je nodig?</strong> Een gemiddelde score van minstens <strong>{CONFIG.attestA_drempel}%</strong> en geen zware rode cijfers op je hoofdvakken.
+                      🎯 <strong>Wat is nodig?</strong> Gemiddelde van minstens <strong>{CONFIG.attestA_drempel}%</strong> en geen zware buizen op hoofdvakken.
                     </div>
                     <div style={{ fontSize: 12, color: "#15803D" }}>
-                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> Stoppen met huistaken maken en deadlines missen. "Niet ingediend" is de snelste weg naar leerkrachten die je liever geen A gunnen op de klassenraad!
+                      ⚠️ <strong>Grootste valkuil:</strong> Stoppen met huistaken te maken. \"Niet ingediend\" op de klassenraad is de snelste weg naar problemen!
                     </div>
-                    <div style={{ fontSize: 12, color: "#15803D", fontWeight: 800, marginTop: 4 }}>
-                      🔑 <strong>Echte takeaway:</strong> Consistentie is key. Verlies geen domme punten op taken en toon dat je erbij wil horen.
-                    </div>
-                  </div>
-
-                  {achievedLabel === "A" && (
-                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #BBF7D0" }}>
-                      <div style={{ fontSize: 11, fontWeight: 900, color: "#166534", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {getStaticFeedbackPoints().map((pt, i) => (
-                          <div key={i} style={{ fontSize: 11, color: "#14532D", lineHeight: 1.4 }}>
-                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
-                          </div>
-                        ))}
+                    {achievedLabel === "A" && (
+                      <div style={{ fontSize: 12, color: "#15803D", fontWeight: 800, marginTop: 4 }}>
+                        🔑 <strong>Takeaway:</strong> Trek die eindsprint aan en houd deze mooie voorsprong vast.
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </motion.div>
               )}
             </motion.div>
@@ -1824,36 +1792,27 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                   animate={{ opacity: 1, height: "auto" }}
                   style={{ marginTop: 16, borderTop: "1px solid #FEF3C7", paddingTop: 14 }}
                 >
-                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #F59E0B3D", marginBottom: 12 }}>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#78350F", fontStyle: "italic", lineHeight: 1.5 }}>
-                      💬 <strong>Van leerling tot leerling:</strong> "Dit is geen ramp, maar wel een serieuze waarschuwing! Je mag door naar volgend jaar, maar bepaalde richtingen blijven gesloten voor jou. Wil je toch naar een A-attest stijgen? Focus direct op die paar mindere vakken en verhoog je attitude. De lerarenraad beslist hierover, dus laat zien dat je écht gemotiveerd bent!"
-                    </p>
-                  </div>
+                  {achievedLabel === "B" && (
+                    <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #F59E0B3D", marginBottom: 12 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#78350F", fontStyle: "italic", lineHeight: 1.5 }}>
+                        💬 <strong>Van leerling tot leerling:</strong> "Geen ramp, je mag over! 🚦 Maar let wel op: sommige richtingen blijven gesloten. Toon nu wat extra motivatie om de klassenraad gunstig te stemmen."
+                      </p>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
                     <div style={{ fontSize: 12, color: "#B45309" }}>
-                      📈 <strong>Hoe geraak je er?</strong> Jouw score ligt tussen <strong>{CONFIG.attestB_drempel}%</strong> en <strong>{CONFIG.attestA_drempel}%</strong>, of je hebt een of twee zware onvoldoendes op kernvakken.
+                      📈 <strong>Wanneer krijg je dit?</strong> Jouw score ligt tussen <strong>{CONFIG.attestB_drempel}%</strong> and <strong>{CONFIG.attestA_drempel}%</strong>, of je hebt buizen op kernvakken.
                     </div>
                     <div style={{ fontSize: 12, color: "#B45309" }}>
-                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> Je leerkrachten tegenwerken of doen alsof er niks aan de hand is. Zij bepalen je uitsluitingen, dus een fijne sfeer bewaren is letterlijk jouw goud waard!
+                      ⚠️ <strong>Wat te vermijden?</strong> Toon geen onverschilligheid. De leerkrachten bepalen mee welke richtingen je niet mag doen, dus een fijne houding is goud waard!
                     </div>
-                    <div style={{ fontSize: 12, color: "#B45309", fontWeight: 800, marginTop: 4 }}>
-                      🔑 <strong>Echte takeaway:</strong> Werk keihard aan die specifieke struikelvakken en ga een keertje praten met de vakleerkracht voor tips.
-                    </div>
-                  </div>
-
-                  {achievedLabel === "B" && (
-                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #FDE68A" }}>
-                      <div style={{ fontSize: 11, fontWeight: 900, color: "#92400E", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {getStaticFeedbackPoints().map((pt, i) => (
-                          <div key={i} style={{ fontSize: 11, color: "#78350F", lineHeight: 1.4 }}>
-                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
-                          </div>
-                        ))}
+                    {achievedLabel === "B" && (
+                      <div style={{ fontSize: 12, color: "#B45309", fontWeight: 800, marginTop: 4 }}>
+                        🔑 <strong>Takeaway:</strong> Praat eens kort met je vakleerkrachten over hoe je kunt groeien. Dat maakt echt indruk!
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </motion.div>
               )}
             </motion.div>
@@ -1901,39 +1860,73 @@ Als je niets vindt, geef dan een lege array [] terug. Geen tekst, geen uitleg, e
                   animate={{ opacity: 1, height: "auto" }}
                   style={{ marginTop: 16, borderTop: "1px solid #FEE2E2", paddingTop: 14 }}
                 >
-                  <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #EF44443D", marginBottom: 12 }}>
-                    <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#7F1D1D", fontStyle: "italic", lineHeight: 1.5 }}>
-                      💬 <strong>Van leerling tot leerling:</strong> "Oké, dit voelt echt even superkut, maar laat je kop niet hangen! Een C-attest betekent dat je gemiddelde te laag is of dat je een grote opstapeling van rode cijfers hebt liggen. Dat kun je keihard voorkomen: lever NU je openstaande taken in, doe actief mee en maak je houding subliem. Een ijzersterke inzet is jouw ultieme reddingsboei!"
-                    </p>
-                  </div>
+                  {achievedLabel === "C" && (
+                    <div style={{ background: "#FFFFFF", borderRadius: 12, padding: 12, border: "1.5px solid #EF44443D", marginBottom: 12 }}>
+                      <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: "#7F1D1D", fontStyle: "italic", lineHeight: 1.5 }}>
+                        💬 <strong>Van leerling tot leerling:</strong> "Dit voelt superzuur, maar laat je koppie niet hangen! 💪 Tip: lever nú nog je openstaande taken in en herpak je attitude. De klassenraad houdt écht rekening met reuzenstappen op het eind!"
+                      </p>
+                    </div>
+                  )}
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "0 4px" }}>
                     <div style={{ fontSize: 12, color: "#B91C1C" }}>
-                      🚨 <strong>Waarom gebeurt dit?</strong> Je totale score valt onder de drempel van <strong>{CONFIG.attestB_drempel}%</strong>, of je hebt te veel onvoldoendes op cruciale vakken.
+                      🚨 <strong>Waarom gebeurt dit?</strong> Je gemiddelde zit onder <strong>{CONFIG.attestB_drempel}%</strong> of je hebt te veel zware buizen liggen.
                     </div>
                     <div style={{ fontSize: 12, color: "#B91C1C" }}>
-                      ⚠️ <strong>Wat mag echt niet gebeuren?</strong> In stilte ontkennen en opgeven. Als je het niet snapt, roep hulp in! En stop met dwarsliggen; leerkrachten helpen liever een leerling die wil verbeteren.
+                      ⚠️ <strong>Wat te vermijden?</strong> In stilte opgeven en niks laten horen. Vraag om hulp, dat toont dat je wilt vechten voor je plek!
                     </div>
-                    <div style={{ fontSize: 12, color: "#B91C1C", fontWeight: 800, marginTop: 4 }}>
-                      🔑 <strong>Echte takeaway:</strong> C-attesten vermijd je door onmiddellijk hulp te vragen en de klassenraad te overtuigen met een goudsmidse instelling.
-                    </div>
-                  </div>
-
-                  {achievedLabel === "C" && (
-                    <div style={{ marginTop: 14, background: "#FFF", borderRadius: 12, padding: 12, border: "1px solid #FCA5A5" }}>
-                      <div style={{ fontSize: 11, fontWeight: 900, color: "#991B1B", marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>⚡ Gepersonaliseerde tips & feedback:</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {getStaticFeedbackPoints().map((pt, i) => (
-                          <div key={i} style={{ fontSize: 11, color: "#7F1D1D", lineHeight: 1.4 }}>
-                            <strong>{pt.icon} {pt.title}:</strong> {pt.text}
-                          </div>
-                        ))}
+                    {achievedLabel === "C" && (
+                      <div style={{ fontSize: 12, color: "#B91C1C", fontWeight: 800, marginTop: 4 }}>
+                        🔑 <strong>Takeaway:</strong> Start vandaag. Een ijzersterke eindsprint dwingt altijd respect af op de klassenraad.
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </motion.div>
               )}
             </motion.div>
+          </div>
+
+          {/* ALWAYS VISIBLE DYNAMIC FEEDBACK BOX MATCHING THEIR TRUE ATTEST */}
+          <div style={{
+            background: achievedLabel === "A" ? "#F0FDF4" : achievedLabel === "B" ? "#FFFBEB" : "#FEF2F2",
+            border: `2px solid ${achievedLabel === "A" ? "#22C55E" : achievedLabel === "B" ? "#F59E0B" : "#EF4444"}`,
+            borderRadius: 24,
+            padding: 20,
+            marginBottom: 20,
+            textAlign: "left",
+            boxShadow: `0 4px 14px ${achievedLabel === "A" ? "#22C55E15" : achievedLabel === "B" ? "#F59E0B15" : "#EF444415"}`
+          }}>
+            <h3 style={{
+              fontSize: 15,
+              fontWeight: 900,
+              color: achievedLabel === "A" ? "#14532D" : achievedLabel === "B" ? "#78350F" : "#7F1D1D",
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 8
+            }}>
+              <span>⚡</span> Jouw gepersonaliseerde tips & feedback (op basis van {score}%):
+            </h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {getStaticFeedbackPoints().map((pt, i) => (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 18, marginTop: 1 }}>{pt.icon}</span>
+                  <div>
+                    <div style={{
+                      fontSize: 13,
+                      fontWeight: 800,
+                      color: achievedLabel === "A" ? "#166534" : achievedLabel === "B" ? "#92400E" : "#991B1B"
+                    }}>{pt.title}</div>
+                    <div style={{
+                      fontSize: 12,
+                      color: achievedLabel === "A" ? "#14532D" : achievedLabel === "B" ? "#78350F" : "#7F1D1D",
+                      lineHeight: 1.4,
+                      marginTop: 2
+                    }}>{pt.text}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <button style={{ ...S.btn, marginBottom: 12 }} onClick={()=>setScreen("breakdown")}>🔍 Bekijk gedetailleerde berekening</button>
