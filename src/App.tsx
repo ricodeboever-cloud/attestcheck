@@ -357,9 +357,9 @@ function AttestatieApp() {
       }, 1000);
       return () => clearTimeout(startupTimer);
     } else {
-      if (!currentUser && screen !== "welcome") {
+      if (!currentUser && screen !== "welcome" && screen !== "register" && screen !== "login") {
         setScreen("welcome");
-      } else if (currentUser && screen === "welcome") {
+      } else if (currentUser && (screen === "welcome" || screen === "register" || screen === "login")) {
         setScreen("dashboard");
       }
     }
